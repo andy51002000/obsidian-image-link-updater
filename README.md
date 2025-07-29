@@ -67,15 +67,4 @@ npm run build
 
 Copy the compiled files (`manifest.json`, `main.js`) into your vault’s plugins folder.
 
----
-
-## Configuration / Roadmap
-* ✏️ Settings tab (coming): choose vault‑root vs relative paths, default paste folder, alt‑text template.
-* 🧪 Bulk “clean‑up” command to normalise older links.
-* 🐞 Bug reports & PRs welcome!
-
----
-
-## Contributing
-Fork → feature/bugfix → PR. Please run `npm run lint` and include screenshots or console logs for UI changes.
 
