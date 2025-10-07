@@ -152,4 +152,8 @@ The plugin respects your Obsidian settings:
 
 ---
 
+## License
+
+Image Link Updater is released under the [GNU Affero General Public License v3.0 or later](./LICENSE).
+
 

@@ -1,10 +1,12 @@
 {
   "name": "obsidian-image-link-updater",
-  "version": "1.0.0",
-  "description": "Update image references in markdown files when image files are renamed or moved",
+  "version": "1.2.1",
+  "description": "Automatically updates markdown image links when image files are renamed or moved in the vault.",
+  "license": "AGPL-3.0-or-later",
   "main": "main.js",
   "scripts": {
-    "build": "rollup -c;cp dist/main.js main.js"
+    "build": "rollup -c;cp dist/main.js main.js",
+    "release": "npm run build && node scripts/prepare-release.mjs"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.1",
