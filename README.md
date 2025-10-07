@@ -1,45 +1,71 @@
-# Image Link Updater (Obsidian Plugin)
+# Image Link Updater (Obsidian Plugin)
 
 Update every image link in your vault **automatically**.
 
-* 🔄 **Drag / Rename** an image in Obsidian File Explorer → every `![…](…)` or `![[…]]` reference is rewritten to the new vault‑root path.
-* 📋 **Paste** an image from the clipboard → stored in your attachment folder and inserted as **Markdown** `![](<path>)` (instead of the default wiki link).
-* 🗃 **Fallback for OS moves** (delete + create events) – if you move images outside Obsidian, links are still fixed by filename.
+* 🔄 **Drag / Rename** an image in Obsidian File Explorer → every `![…](…)` or `![[…]]` reference is rewritten to the new vault‑root path.
+* 📋 **Paste** an image from the clipboard → stored in your attachment folder and inserted as **Markdown** `![](<path>)` (instead of the default wiki link).
+* ✂️ **Cut & Paste** files with context menu → move single or multiple files and automatically update all image links.
+* 🗃 **Fallback for OS moves** (delete + create events) – if you move images outside Obsidian, links are still fixed by filename.
 
 ---
 
-## Why use it?
+## Why use it?
 
 * **Stop broken screenshots** – keep your docs intact when you reorganise folders.
 * **Markdown‑first** workflow – pasting images no longer forces wiki links.
 * **Works with spaces** – matches both raw names (`My image.png`) and URI‑encoded names (`My%20image.png`).
+* **Efficient file management** – cut and paste multiple files at once with automatic link updates.
 
 ---
 
-## Features in detail
+## Features in detail
 
 | Action                    | Before                                    | After                                             |
 | ------------------------- | ----------------------------------------- | ------------------------------------------------- |
 | **Move / Rename** image   | `![Alt](assets/img.png)`                  | `![Alt](Docs/assets/img.png)`                     |
 | **Paste** image           | *Default Obsidian*: `![[Pasted image …]]` | *Plugin*: `![](Images/Pasted%20image%202025…png)` |
+| **Cut & Paste** files     | Manual drag with broken links             | Right-click cut/paste with auto-updated links     |
 | **Move outside Obsidian** | `![](foo.png)` *(broken)*                 | `![](NewFolder/foo.png)`                          |
 
 *Rewrites vault‑wide; wiki links keep spaces un‑encoded.*
 
 ---
 
-## Installation
+## Cut & Paste Files
 
-### Community Plugins (recommended)
+Move files efficiently with automatic link updates:
+
+### Single File
+1. Right-click on any file → **Cut**
+2. Navigate to destination folder
+3. Right-click on folder → **Paste**
+
+### Multiple Files
+1. Select multiple files (Shift + Click or Ctrl + Click)
+2. Right-click on any selected file → **Cut (X items)**
+3. Right-click on destination folder → **Paste X files**
+
+**Features:**
+- Automatically handles name conflicts (adds numbers like `file 1.png`)
+- Updates all image links throughout your vault
+- Works with both image and non-image files
+- Shows notifications for success/failure
+- Can paste to folders or vault root
+
+---
+
+## Installation
+
+### Community Plugins (recommended)
 Once approved:
-1. `Settings → Community plugins → Browse`
-2. Search **“Image Link Updater”** and click **Install**
-3. Enable the plugin
+1. `Settings → Community plugins → Browse`
+2. Search **"Image Link Updater"** and click **Install**
+3. Enable the plugin
 
-### Manual
-1. Download the latest release assets: `manifest.json`, `main.js`, (optional `styles.css`)
-2. Create a folder `<your vault>/.obsidian/plugins/image-link-updater/`
-3. Place the files inside, matching this layout:
+### Manual
+1. Download the latest release assets: `manifest.json`, `main.js`, (optional `styles.css`)
+2. Create a folder `<your vault>/.obsidian/plugins/image-link-updater/`
+3. Place the files inside, matching this layout:
 
 ```
 image-link-updater/
@@ -47,11 +73,11 @@ image-link-updater/
 └─ main.js
 ```
 
-4. Enable the plugin in **Settings → Community plugins**
+4. Enable the plugin in **Settings → Community plugins**
 
 ---
 
-## Building from source
+## Building from source
 
 ```bash
 # 1. clone
@@ -65,6 +91,60 @@ npm install
 npm run build
 ```
 
-Copy the compiled files (`manifest.json`, `main.js`) into your vault’s plugins folder.
+Copy the compiled files (`manifest.json`, `main.js`) into your vault's plugins folder.
+
+---
+
+## How it works
+
+### Automatic Link Updates
+When you move or rename image files, the plugin:
+1. Detects the change via Obsidian's vault events
+2. Searches all markdown files for references to the old path
+3. Rewrites links to use vault-root absolute paths
+4. Handles both Markdown `![](path)` and Wiki `![[path]]` formats
+
+### Clipboard Image Handling
+When you paste an image:
+1. Intercepts the paste event
+2. Saves the image to your configured attachment folder
+3. Inserts a Markdown link with URI-encoded path
+4. Ensures proper leading slash for vault-root paths
+
+### Cut & Paste with Link Updates
+When you cut and paste files:
+1. Stores the selected files in memory
+2. Moves files to the destination folder on paste
+3. Automatically updates all image links if moving image files
+4. Handles multiple files in batch operations
+
+---
+
+## Configuration
+
+The plugin respects your Obsidian settings:
+- **Attachment folder**: Uses your configured attachment folder path
+- **File naming**: Follows Obsidian's naming conventions
+- **Link format**: Generates Markdown links for pasted images
+
+---
+
+## Troubleshooting
+
+**Links not updating after move?**
+- Check the developer console (Ctrl+Shift+I / Cmd+Option+I) for `[ImageLinkUpdater]` messages
+- Ensure the file is recognized as an image (png, jpg, jpeg, gif, bmp, svg, webp)
+
+**Cut option not appearing?**
+- Make sure the plugin is enabled in Settings → Community plugins
+- Try rebuilding the plugin if installed manually
+- Check that you're right-clicking on files (not folders) for the Cut option
+
+**Paste not working?**
+- Ensure you've cut files first (look for notification confirming cut)
+- Right-click on a folder or in empty space to paste
+- Check console for any error messages
+
+---
 
 

@@ -9,7 +9,7 @@ var obsidian = require('obsidian');
  * 2) On clipboard image paste, insert Markdown image links `![](<vault-root path>)` instead of wiki links.
  * 3) Fallback: When an image file is created (e.g., OS move appears as delete+create),
  *    update links by matching the file name anywhere in the vault.
- * 4) Cut and paste functionality for files via right-click context menu.
+ * 4) Cut and paste functionality for multiple files via right-click context menu.
  *
  * NOTE: We match BOTH raw names (with spaces) and URI-encoded names (with %20),
  * so dragging a file whose link was previously `![](Pasted%20image ....png)` will be updated.
@@ -17,7 +17,7 @@ var obsidian = require('obsidian');
 class ImageLinkUpdaterPlugin extends obsidian.Plugin {
     constructor() {
         super(...arguments);
-        this.cutFile = null;
+        this.cutFiles = []; // Store multiple files that were cut
     }
     async onload() {
         // --- Rename/Move handler ---
@@ -74,43 +74,128 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 console.log('[ImageLinkUpdater] pasted image ->', dest);
             }
         }));
-        // --- Single consolidated context menu handler for Cut / Paste ---
-        this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
-            // CUT for files
+        // --- Context menu handler for Cut / Paste (similar to "New folder with selection") ---
+        this.registerEvent(this.app.workspace.on('files-menu', (menu, files) => {
+            // This event fires when right-clicking with multiple files selected
+            // files is an array of selected files/folders
+            const selectedFiles = files.filter(f => f instanceof obsidian.TFile);
+            if (selectedFiles.length > 0) {
+                menu.addItem((item) => {
+                    const label = selectedFiles.length === 1
+                        ? 'Cut'
+                        : `Cut (${selectedFiles.length} items)`;
+                    item
+                        .setTitle(label)
+                        .setIcon('scissors')
+                        .onClick(() => {
+                        this.cutFiles = selectedFiles;
+                        new obsidian.Notice(`Cut ${this.cutFiles.length} file${this.cutFiles.length > 1 ? 's' : ''}`);
+                        console.log('[ImageLinkUpdater] Cut files:', this.cutFiles.map(f => f.path));
+                    });
+                });
+            }
+        }));
+        // --- Single file context menu ---
+        this.registerEvent(this.app.workspace.on('file-menu', (menu, file, source) => {
+            // CUT for single file
             if (file instanceof obsidian.TFile) {
                 menu.addItem((item) => {
                     item
                         .setTitle('Cut')
                         .setIcon('scissors')
                         .onClick(() => {
-                        this.cutFile = file;
+                        this.cutFiles = [file];
+                        new obsidian.Notice(`Cut: ${file.name}`);
                         console.log('[ImageLinkUpdater] Cut file:', file.path);
                     });
                 });
             }
-            // PASTE into a folder when a file is cut
-            if (file instanceof obsidian.TFolder && this.cutFile) {
+            // PASTE into a folder when files are cut
+            if (file instanceof obsidian.TFolder && this.cutFiles.length > 0) {
                 menu.addItem((item) => {
+                    const label = this.cutFiles.length === 1
+                        ? `Paste "${this.cutFiles[0].name}"`
+                        : `Paste ${this.cutFiles.length} files`;
                     item
-                        .setTitle(`Paste "${this.cutFile.name}"`)
+                        .setTitle(label)
                         .setIcon('clipboard')
                         .onClick(async () => {
-                        await this.pasteFile(file);
+                        await this.pasteFiles(file);
                     });
                 });
             }
-            // PASTE to root when right-clicking empty space in file explorer
-            if (!file && this.cutFile) {
+            // PASTE when right-clicking on a file (paste to that file's folder)
+            if (file instanceof obsidian.TFile && this.cutFiles.length > 0) {
                 menu.addItem((item) => {
+                    const targetFolder = file.parent;
+                    const folderName = targetFolder?.name || 'root';
+                    const label = this.cutFiles.length === 1
+                        ? `Paste to ${folderName}`
+                        : `Paste ${this.cutFiles.length} files to ${folderName}`;
                     item
-                        .setTitle(`Paste "${this.cutFile.name}" to root`)
+                        .setTitle(label)
                         .setIcon('clipboard')
                         .onClick(async () => {
-                        await this.pasteToRoot();
+                        if (targetFolder) {
+                            await this.pasteFiles(targetFolder);
+                        }
+                        else {
+                            await this.pasteToRoot();
+                        }
                     });
                 });
             }
         }));
+    }
+    /**
+     * Get currently selected files from file explorer
+     */
+    getSelectedFiles() {
+        try {
+            const fileExplorer = this.app.workspace.getLeavesOfType('file-explorer')[0];
+            if (!fileExplorer) {
+                console.log('[ImageLinkUpdater] File explorer not found');
+                return [];
+            }
+            const explorerView = fileExplorer.view;
+            // Try multiple methods to get selected files
+            // Method 1: Try using tree.selectedDoms
+            if (explorerView?.tree?.selectedDoms) {
+                const selectedFiles = [];
+                for (const dom of explorerView.tree.selectedDoms) {
+                    const file = explorerView.fileItems?.[dom.dataset?.path];
+                    if (file?.file instanceof obsidian.TFile) {
+                        selectedFiles.push(file.file);
+                    }
+                }
+                if (selectedFiles.length > 0) {
+                    console.log('[ImageLinkUpdater] Found selected files (method 1):', selectedFiles.length);
+                    return selectedFiles;
+                }
+            }
+            // Method 2: Try fileItems with is-selected class
+            if (explorerView?.fileItems) {
+                const selectedFiles = [];
+                for (const [path, item] of Object.entries(explorerView.fileItems)) {
+                    if (item.selfEl?.hasClass('is-selected')) {
+                        const file = this.app.vault.getAbstractFileByPath(path);
+                        if (file instanceof obsidian.TFile) {
+                            selectedFiles.push(file);
+                        }
+                    }
+                }
+                if (selectedFiles.length > 0) {
+                    console.log('[ImageLinkUpdater] Found selected files (method 2):', selectedFiles.length);
+                    return selectedFiles;
+                }
+            }
+            console.log('[ImageLinkUpdater] No selected files found');
+            return [];
+        }
+        catch (error) {
+            console.error('[ImageLinkUpdater] Error getting selected files:', error);
+            return [];
+        }
     }
     /** Ensure a folder exists (skip if root or already exists) */
     async ensureFolderExists(folderPath) {
@@ -118,7 +203,6 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         if (!normalized || normalized === '/')
             return;
         try {
-            // If it already exists, this will throw; that's fine.
             await this.app.vault.createFolder(normalized);
         }
         catch (_e) {
@@ -126,70 +210,90 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         }
     }
     /**
-     * Paste the cut file to the specified folder
+     * Paste multiple cut files to the specified folder
      */
-    async pasteFile(targetFolder) {
-        if (!this.cutFile)
+    async pasteFiles(targetFolder) {
+        if (this.cutFiles.length === 0)
             return;
-        const oldPath = this.cutFile.path;
-        const newPath = obsidian.normalizePath(`${targetFolder.path}/${this.cutFile.name}`);
-        try {
-            // Check if file with same name already exists in target folder
-            const existingFile = this.app.vault.getAbstractFileByPath(newPath);
-            if (existingFile) {
-                // Generate unique name
-                const { name, extension } = this.getFileNameAndExtension(this.cutFile.name);
-                const uniquePath = await this.uniquePath(newPath, name, extension, targetFolder.path);
-                await this.app.fileManager.renameFile(this.cutFile, uniquePath);
-                console.log('[ImageLinkUpdater] Moved file to unique path:', uniquePath);
-            }
-            else {
-                await this.app.fileManager.renameFile(this.cutFile, newPath);
+        let successCount = 0;
+        let failCount = 0;
+        for (const file of this.cutFiles) {
+            try {
+                const oldPath = file.path;
+                let newPath = obsidian.normalizePath(`${targetFolder.path}/${file.name}`);
+                // Check if file with same name already exists in target folder
+                const existingFile = this.app.vault.getAbstractFileByPath(newPath);
+                if (existingFile) {
+                    // Generate unique name
+                    const { name, extension } = this.getFileNameAndExtension(file.name);
+                    newPath = await this.uniquePath(newPath, name, extension, targetFolder.path);
+                }
+                // Move the file
+                await this.app.fileManager.renameFile(file, newPath);
                 console.log('[ImageLinkUpdater] Moved file:', oldPath, '->', newPath);
+                // Update image links if it's an image file
+                if (this.isImage(file)) {
+                    await this.updateImageLinks(oldPath, newPath);
+                }
+                successCount++;
             }
-            // Update image links if it's an image file
-            if (this.isImage(this.cutFile)) {
-                await this.updateImageLinks(oldPath, this.cutFile.path);
+            catch (error) {
+                console.error('[ImageLinkUpdater] Error moving file:', file.path, error);
+                failCount++;
             }
-            // Clear the cut file
-            this.cutFile = null;
         }
-        catch (error) {
-            console.error('[ImageLinkUpdater] Error moving file:', error);
+        // Show result notification
+        if (successCount > 0) {
+            new obsidian.Notice(`Moved ${successCount} file${successCount > 1 ? 's' : ''} to ${targetFolder.name}`);
         }
+        if (failCount > 0) {
+            new obsidian.Notice(`Failed to move ${failCount} file${failCount > 1 ? 's' : ''}`);
+        }
+        // Clear the cut files
+        this.cutFiles = [];
     }
     /**
-     * Paste the cut file to the vault root
+     * Paste multiple cut files to the vault root
      */
     async pasteToRoot() {
-        if (!this.cutFile)
+        if (this.cutFiles.length === 0)
             return;
-        const oldPath = this.cutFile.path;
-        const newPath = this.cutFile.name;
-        try {
-            // Check if file with same name already exists in root
-            const existingFile = this.app.vault.getAbstractFileByPath(newPath);
-            if (existingFile) {
-                // Generate unique name
-                const { name, extension } = this.getFileNameAndExtension(this.cutFile.name);
-                const uniquePath = await this.uniquePath(newPath, name, extension, '');
-                await this.app.fileManager.renameFile(this.cutFile, uniquePath);
-                console.log('[ImageLinkUpdater] Moved file to root with unique path:', uniquePath);
-            }
-            else {
-                await this.app.fileManager.renameFile(this.cutFile, newPath);
+        let successCount = 0;
+        let failCount = 0;
+        for (const file of this.cutFiles) {
+            try {
+                const oldPath = file.path;
+                let newPath = file.name;
+                // Check if file with same name already exists in root
+                const existingFile = this.app.vault.getAbstractFileByPath(newPath);
+                if (existingFile) {
+                    // Generate unique name
+                    const { name, extension } = this.getFileNameAndExtension(file.name);
+                    newPath = await this.uniquePath(newPath, name, extension, '');
+                }
+                // Move the file
+                await this.app.fileManager.renameFile(file, newPath);
                 console.log('[ImageLinkUpdater] Moved file to root:', oldPath, '->', newPath);
+                // Update image links if it's an image file
+                if (this.isImage(file)) {
+                    await this.updateImageLinks(oldPath, newPath);
+                }
+                successCount++;
             }
-            // Update image links if it's an image file
-            if (this.isImage(this.cutFile)) {
-                await this.updateImageLinks(oldPath, this.cutFile.path);
+            catch (error) {
+                console.error('[ImageLinkUpdater] Error moving file to root:', file.path, error);
+                failCount++;
             }
-            // Clear the cut file
-            this.cutFile = null;
         }
-        catch (error) {
-            console.error('[ImageLinkUpdater] Error moving file to root:', error);
+        // Show result notification
+        if (successCount > 0) {
+            new obsidian.Notice(`Moved ${successCount} file${successCount > 1 ? 's' : ''} to root`);
         }
+        if (failCount > 0) {
+            new obsidian.Notice(`Failed to move ${failCount} file${failCount > 1 ? 's' : ''}`);
+        }
+        // Clear the cut files
+        this.cutFiles = [];
     }
     /**
      * Get file name and extension separately
@@ -250,9 +354,6 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 await this.app.vault.modify(md, updated);
                 console.log('[ImageLinkUpdater] updated file', { mdFile: md.path, to: abs });
             }
-            else {
-                console.log('[ImageLinkUpdater] no references found in', md.path, 'for', oldFileName);
-            }
         }
     }
     /** Update links by file name only (used on create fallback) */
@@ -271,7 +372,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             let changed = false;
             let updated = content
                 .replace(mdByName, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
-                .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; }); // FIX: close brackets
+                .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
             if (changed) {
                 await this.app.vault.modify(md, updated);
                 console.log('[ImageLinkUpdater] updated by filename', { mdFile: md.path, to: abs });
