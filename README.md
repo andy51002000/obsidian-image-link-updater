@@ -1,6 +1,11 @@
 # Image Link Updater (Obsidian Plugin)
 
+<a href="https://buymeacoffee.com/andy51002000" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-green.png" alt="Buy Me A Coffee" width="200" />
+</a>
+
 Update every image link in your vault **automatically**.
+
 
 * 🔄 **Drag / Rename** an image in Obsidian File Explorer → every `![…](…)` or `![[…]]` reference is rewritten to the new vault‑root path.
 * 📋 **Paste** an image from the clipboard → stored in your attachment folder and inserted as **Markdown** `![](<path>)` (instead of the default wiki link).
