@@ -16,7 +16,7 @@ Link to my plugin: https://github.com/andy51002000/obsidian-image-link-updater
   - [x] `main.js`
   - [x] `manifest.json`
   - [ ] `styles.css` _(optional)_
-- [x] GitHub release name matches the exact version number specified in my `manifest.json` (1.3.3)
+- [x] GitHub release name matches the exact version number specified in my manifest.json (Note: Use the exact version number, don't include a prefix v)
 - [x] The `id` in my `manifest.json` matches the `id` in the `community-plugins.json` file.
 - [x] My README.md describes the plugin's purpose and provides clear usage instructions.
 - [x] I have read the developer policies at https://docs.obsidian.md/Developer+policies, and have assessed my plugin's adherence to these policies.
