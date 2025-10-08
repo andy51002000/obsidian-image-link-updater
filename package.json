@@ -1,6 +1,6 @@
 {
   "name": "obsidian-image-link-updater",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "Automatically updates markdown image links when image files are renamed or moved in the vault.",
   "license": "AGPL-3.0-or-later",
   "main": "main.js",
