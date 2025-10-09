@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build and prepare release
+        run: npm run release
+
+      - name: Read manifest metadata
+        id: manifest
+        run: |
+          echo "id=$(jq -r '.id' manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Package release assets
+        id: package
+        run: |
+          set -euo pipefail
+          PLUGIN_ID="${{ steps.manifest.outputs.id }}"
+          cd release
+          zip -r "${PLUGIN_ID}.zip" "${PLUGIN_ID}"
+          FILES=$'release/${PLUGIN_ID}.zip\nrelease/${PLUGIN_ID}/manifest.json\nrelease/${PLUGIN_ID}/main.js'
+          if [ -f "${PLUGIN_ID}/styles.css" ]; then
+            FILES="${FILES}"$'\n'"release/${PLUGIN_ID}/styles.css"
+          fi
+          {
+            echo "files<<EOF"
+            echo "$FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.files }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
