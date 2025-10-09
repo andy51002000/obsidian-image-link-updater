@@ -18,19 +18,20 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
     constructor() {
         super(...arguments);
         this.cutFiles = []; // Store multiple files that were cut
+        this.debugEnabled = false;
     }
     async onload() {
         // --- Rename/Move handler ---
         this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
             if (file instanceof obsidian.TFile && this.isImage(file)) {
-                console.log('[ImageLinkUpdater] rename event', { oldPath, newPath: file.path });
+                this.logDebug('rename event', { oldPath, newPath: file.path });
                 this.updateImageLinks(oldPath, file.path);
             }
         }));
         // --- Create handler (covers OS-level moves that appear as delete+create) ---
         this.registerEvent(this.app.vault.on('create', async (file) => {
             if (file instanceof obsidian.TFile && this.isImage(file)) {
-                console.log('[ImageLinkUpdater] create event', { path: file.path });
+                this.logDebug('create event', { path: file.path });
                 await this.updateImageLinksByFilename(file.name, file.path);
             }
         }));
@@ -46,13 +47,16 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 return;
             // Determine destination folder for attachments
             let folderPath;
-            const fm = this.app.fileManager; // internal API
+            const fm = this.getFileManager();
             if (fm?.getAttachmentFolderPath) {
                 folderPath = obsidian.normalizePath(fm.getAttachmentFolderPath(activeFile));
             }
-            else {
-                const parent = fm?.getNewFileParent ? fm.getNewFileParent(activeFile.path) : null;
+            else if (fm?.getNewFileParent) {
+                const parent = fm.getNewFileParent(activeFile.path);
                 folderPath = obsidian.normalizePath(parent?.path ?? '/');
+            }
+            else {
+                folderPath = obsidian.normalizePath('/');
             }
             // Ensure folder exists (no-op if it already does)
             await this.ensureFolderExists(folderPath);
@@ -71,14 +75,14 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 const mdPath = encodeURI(this.ensureLeadingSlash(dest));
                 editor.replaceSelection(`![](${mdPath})`);
                 editor.setCursor(editor.getCursor());
-                console.log('[ImageLinkUpdater] pasted image ->', dest);
+                this.logDebug('pasted image ->', dest);
             }
         }));
         // --- Context menu handler for Cut / Paste (similar to "New folder with selection") ---
         this.registerEvent(this.app.workspace.on('files-menu', (menu, files) => {
             // This event fires when right-clicking with multiple files selected
             // files is an array of selected files/folders
-            const selectedFiles = files.filter(f => f instanceof obsidian.TFile);
+            const selectedFiles = files.filter((f) => f instanceof obsidian.TFile);
             if (selectedFiles.length > 0) {
                 menu.addItem((item) => {
                     const label = selectedFiles.length === 1
@@ -90,7 +94,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                         .onClick(() => {
                         this.cutFiles = selectedFiles;
                         new obsidian.Notice(`Cut ${this.cutFiles.length} file${this.cutFiles.length > 1 ? 's' : ''}`);
-                        console.log('[ImageLinkUpdater] Cut files:', this.cutFiles.map(f => f.path));
+                        this.logDebug('Cut files:', this.cutFiles.map(f => f.path));
                     });
                 });
             }
@@ -106,7 +110,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                         .onClick(() => {
                         this.cutFiles = [file];
                         new obsidian.Notice(`Cut: ${file.name}`);
-                        console.log('[ImageLinkUpdater] Cut file:', file.path);
+                        this.logDebug('Cut file:', file.path);
                     });
                 });
             }
@@ -147,55 +151,132 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             }
         }));
     }
+    logDebug(...data) {
+        if (!this.debugEnabled) {
+            return;
+        }
+        console.debug('[ImageLinkUpdater]', ...data);
+    }
     /**
      * Get currently selected files from file explorer
      */
     getSelectedFiles() {
         try {
-            const fileExplorer = this.app.workspace.getLeavesOfType('file-explorer')[0];
-            if (!fileExplorer) {
-                console.log('[ImageLinkUpdater] File explorer not found');
+            const fileExplorerLeaf = this.app.workspace.getLeavesOfType('file-explorer')[0];
+            if (!fileExplorerLeaf) {
+                this.logDebug('File explorer not found');
                 return [];
             }
-            const explorerView = fileExplorer.view;
-            // Try multiple methods to get selected files
-            // Method 1: Try using tree.selectedDoms
-            if (explorerView?.tree?.selectedDoms) {
-                const selectedFiles = [];
-                for (const dom of explorerView.tree.selectedDoms) {
-                    const file = explorerView.fileItems?.[dom.dataset?.path];
-                    if (file?.file instanceof obsidian.TFile) {
-                        selectedFiles.push(file.file);
-                    }
-                }
-                if (selectedFiles.length > 0) {
-                    console.log('[ImageLinkUpdater] Found selected files (method 1):', selectedFiles.length);
-                    return selectedFiles;
-                }
+            const explorerView = this.getExplorerView(fileExplorerLeaf.view);
+            if (!explorerView) {
+                this.logDebug('File explorer view missing expected shape');
+                return [];
             }
-            // Method 2: Try fileItems with is-selected class
-            if (explorerView?.fileItems) {
-                const selectedFiles = [];
-                for (const [path, item] of Object.entries(explorerView.fileItems)) {
-                    if (item.selfEl?.hasClass('is-selected')) {
-                        const file = this.app.vault.getAbstractFileByPath(path);
-                        if (file instanceof obsidian.TFile) {
-                            selectedFiles.push(file);
-                        }
-                    }
-                }
-                if (selectedFiles.length > 0) {
-                    console.log('[ImageLinkUpdater] Found selected files (method 2):', selectedFiles.length);
-                    return selectedFiles;
-                }
+            const treeSelection = this.collectSelectedFromTree(explorerView);
+            if (treeSelection.length > 0) {
+                this.logDebug('Found selected files (method 1):', treeSelection.length);
+                return treeSelection;
             }
-            console.log('[ImageLinkUpdater] No selected files found');
+            const classSelection = this.collectSelectedFromFileItems(explorerView.fileItems);
+            if (classSelection.length > 0) {
+                this.logDebug('Found selected files (method 2):', classSelection.length);
+                return classSelection;
+            }
+            this.logDebug('No selected files found');
             return [];
         }
         catch (error) {
             console.error('[ImageLinkUpdater] Error getting selected files:', error);
             return [];
         }
+    }
+    getExplorerView(view) {
+        if (!view || typeof view !== 'object') {
+            return null;
+        }
+        const maybeView = view;
+        const tree = maybeView.tree;
+        if (tree !== undefined && (typeof tree !== 'object' || tree === null)) {
+            return null;
+        }
+        const fileItems = maybeView.fileItems;
+        if (fileItems !== undefined && (typeof fileItems !== 'object' || fileItems === null)) {
+            return null;
+        }
+        return maybeView;
+    }
+    collectSelectedFromTree(view) {
+        const selected = [];
+        const selectedDoms = view.tree?.selectedDoms;
+        if (!Array.isArray(selectedDoms) || !view.fileItems) {
+            return selected;
+        }
+        for (const dom of selectedDoms) {
+            const path = this.getDatasetPath(dom);
+            if (!path) {
+                continue;
+            }
+            const file = this.getFileFromItem(view.fileItems[path]);
+            if (file) {
+                selected.push(file);
+            }
+        }
+        return selected;
+    }
+    collectSelectedFromFileItems(items) {
+        if (!items) {
+            return [];
+        }
+        const selected = [];
+        for (const [path, item] of Object.entries(items)) {
+            if (!this.hasSelectedClass(item.selfEl)) {
+                continue;
+            }
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (file instanceof obsidian.TFile) {
+                selected.push(file);
+            }
+        }
+        return selected;
+    }
+    getDatasetPath(dom) {
+        if (!dom) {
+            return null;
+        }
+        const dataset = dom.dataset;
+        const path = dataset?.path;
+        return typeof path === 'string' ? path : null;
+    }
+    hasSelectedClass(element) {
+        if (!element) {
+            return false;
+        }
+        const withHasClass = element;
+        if (typeof withHasClass.hasClass === 'function') {
+            return withHasClass.hasClass('is-selected');
+        }
+        return element.classList?.contains('is-selected') ?? false;
+    }
+    getFileFromItem(item) {
+        if (item?.file instanceof obsidian.TFile) {
+            return item.file;
+        }
+        return null;
+    }
+    getFileManager() {
+        const maybeApp = this.app;
+        if (this.isFileManagerLike(maybeApp.fileManager)) {
+            return maybeApp.fileManager;
+        }
+        return null;
+    }
+    isFileManagerLike(value) {
+        if (!value || typeof value !== 'object') {
+            return false;
+        }
+        const manager = value;
+        return (typeof manager.getAttachmentFolderPath === 'function' ||
+            typeof manager.getNewFileParent === 'function');
     }
     /** Ensure a folder exists (skip if root or already exists) */
     async ensureFolderExists(folderPath) {
@@ -230,7 +311,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 }
                 // Move the file
                 await this.app.fileManager.renameFile(file, newPath);
-                console.log('[ImageLinkUpdater] Moved file:', oldPath, '->', newPath);
+                this.logDebug('Moved file:', oldPath, '->', newPath);
                 // Update image links if it's an image file
                 if (this.isImage(file)) {
                     await this.updateImageLinks(oldPath, newPath);
@@ -273,7 +354,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 }
                 // Move the file
                 await this.app.fileManager.renameFile(file, newPath);
-                console.log('[ImageLinkUpdater] Moved file to root:', oldPath, '->', newPath);
+                this.logDebug('Moved file to root:', oldPath, '->', newPath);
                 // Update image links if it's an image file
                 if (this.isImage(file)) {
                     await this.updateImageLinks(oldPath, newPath);
@@ -352,7 +433,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
             if (changed) {
                 await this.app.vault.modify(md, updated);
-                console.log('[ImageLinkUpdater] updated file', { mdFile: md.path, to: abs });
+                this.logDebug('updated file', { mdFile: md.path, to: abs });
             }
         }
     }
@@ -375,7 +456,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
             if (changed) {
                 await this.app.vault.modify(md, updated);
-                console.log('[ImageLinkUpdater] updated by filename', { mdFile: md.path, to: abs });
+                this.logDebug('updated by filename', { mdFile: md.path, to: abs });
             }
         }
     }
