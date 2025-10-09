@@ -39,12 +39,9 @@ jobs:
           PLUGIN_ID="${{ steps.manifest.outputs.id }}"
           cd release
           zip -r "${PLUGIN_ID}.zip" "${PLUGIN_ID}"
-          FILES="release/${PLUGIN_ID}.zip
-release/${PLUGIN_ID}/manifest.json
-release/${PLUGIN_ID}/main.js"
+          FILES=$'release/${PLUGIN_ID}.zip\nrelease/${PLUGIN_ID}/manifest.json\nrelease/${PLUGIN_ID}/main.js'
           if [ -f "${PLUGIN_ID}/styles.css" ]; then
-            FILES="${FILES}
-release/${PLUGIN_ID}/styles.css"
+            FILES="${FILES}"$'\n'"release/${PLUGIN_ID}/styles.css"
           fi
           {
             echo "files<<EOF"
