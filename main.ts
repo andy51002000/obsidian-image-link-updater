@@ -1,5 +1,22 @@
 import { Plugin, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
 
+type FileManagerLike = {
+  getAttachmentFolderPath?(file: TFile): string;
+  getNewFileParent?(path: string): TFolder | null;
+};
+
+type ExplorerFileItem = {
+  file?: TFile;
+  selfEl?: Element & { hasClass?(className: string): boolean };
+};
+
+type ExplorerView = {
+  tree?: {
+    selectedDoms?: Array<Element & { dataset?: DOMStringMap }>;
+  };
+  fileItems?: Record<string, ExplorerFileItem>;
+};
+
 /**
  * Features:
  * 1) On image rename/move (via Obsidian File Explorer), rewrite all references to
@@ -14,13 +31,14 @@ import { Plugin, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian'
  */
 export default class ImageLinkUpdaterPlugin extends Plugin {
   private cutFiles: TFile[] = []; // Store multiple files that were cut
+  private readonly debugEnabled = false;
 
   async onload() {
     // --- Rename/Move handler ---
     this.registerEvent(
       this.app.vault.on('rename', (file, oldPath) => {
         if (file instanceof TFile && this.isImage(file)) {
-          console.log('[ImageLinkUpdater] rename event', { oldPath, newPath: file.path });
+          this.logDebug('rename event', { oldPath, newPath: file.path });
           this.updateImageLinks(oldPath, file.path);
         }
       })
@@ -30,7 +48,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on('create', async (file) => {
         if (file instanceof TFile && this.isImage(file)) {
-          console.log('[ImageLinkUpdater] create event', { path: file.path });
+          this.logDebug('create event', { path: file.path });
           await this.updateImageLinksByFilename(file.name, file.path);
         }
       })
@@ -50,12 +68,14 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
         // Determine destination folder for attachments
         let folderPath: string;
-        const fm: any = (this.app as any).fileManager; // internal API
+        const fm = this.getFileManager();
         if (fm?.getAttachmentFolderPath) {
           folderPath = normalizePath(fm.getAttachmentFolderPath(activeFile));
-        } else {
-          const parent = fm?.getNewFileParent ? fm.getNewFileParent(activeFile.path) : null;
+        } else if (fm?.getNewFileParent) {
+          const parent = fm.getNewFileParent(activeFile.path);
           folderPath = normalizePath(parent?.path ?? '/');
+        } else {
+          folderPath = normalizePath('/');
         }
 
         // Ensure folder exists (no-op if it already does)
@@ -79,7 +99,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           editor.replaceSelection(`![](${mdPath})`);
           editor.setCursor(editor.getCursor());
 
-          console.log('[ImageLinkUpdater] pasted image ->', dest);
+          this.logDebug('pasted image ->', dest);
         }
       })
     );
@@ -89,7 +109,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       this.app.workspace.on('files-menu', (menu, files) => {
         // This event fires when right-clicking with multiple files selected
         // files is an array of selected files/folders
-        const selectedFiles = files.filter(f => f instanceof TFile) as TFile[];
+        const selectedFiles = files.filter((f): f is TFile => f instanceof TFile);
         
         if (selectedFiles.length > 0) {
           menu.addItem((item) => {
@@ -103,7 +123,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
               .onClick(() => {
                 this.cutFiles = selectedFiles;
                 new Notice(`Cut ${this.cutFiles.length} file${this.cutFiles.length > 1 ? 's' : ''}`);
-                console.log('[ImageLinkUpdater] Cut files:', this.cutFiles.map(f => f.path));
+                this.logDebug('Cut files:', this.cutFiles.map(f => f.path));
               });
           });
         }
@@ -122,7 +142,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
               .onClick(() => {
                 this.cutFiles = [file];
                 new Notice(`Cut: ${file.name}`);
-                console.log('[ImageLinkUpdater] Cut file:', file.path);
+                this.logDebug('Cut file:', file.path);
               });
           });
         }
@@ -168,58 +188,159 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     );
   }
 
+  private logDebug(...data: unknown[]) {
+    if (!this.debugEnabled) {
+      return;
+    }
+    console.debug('[ImageLinkUpdater]', ...data);
+  }
+
   /**
    * Get currently selected files from file explorer
    */
   private getSelectedFiles(): TFile[] {
     try {
-      const fileExplorer = this.app.workspace.getLeavesOfType('file-explorer')[0];
-      if (!fileExplorer) {
-        console.log('[ImageLinkUpdater] File explorer not found');
+      const fileExplorerLeaf = this.app.workspace.getLeavesOfType('file-explorer')[0];
+      if (!fileExplorerLeaf) {
+        this.logDebug('File explorer not found');
         return [];
       }
 
-      const explorerView = fileExplorer.view as any;
-      
-      // Try multiple methods to get selected files
-      // Method 1: Try using tree.selectedDoms
-      if (explorerView?.tree?.selectedDoms) {
-        const selectedFiles: TFile[] = [];
-        for (const dom of explorerView.tree.selectedDoms) {
-          const file = explorerView.fileItems?.[dom.dataset?.path];
-          if (file?.file instanceof TFile) {
-            selectedFiles.push(file.file);
-          }
-        }
-        if (selectedFiles.length > 0) {
-          console.log('[ImageLinkUpdater] Found selected files (method 1):', selectedFiles.length);
-          return selectedFiles;
-        }
+      const explorerView = this.getExplorerView(fileExplorerLeaf.view);
+      if (!explorerView) {
+        this.logDebug('File explorer view missing expected shape');
+        return [];
       }
 
-      // Method 2: Try fileItems with is-selected class
-      if (explorerView?.fileItems) {
-        const selectedFiles: TFile[] = [];
-        for (const [path, item] of Object.entries(explorerView.fileItems)) {
-          if ((item as any).selfEl?.hasClass('is-selected')) {
-            const file = this.app.vault.getAbstractFileByPath(path);
-            if (file instanceof TFile) {
-              selectedFiles.push(file);
-            }
-          }
-        }
-        if (selectedFiles.length > 0) {
-          console.log('[ImageLinkUpdater] Found selected files (method 2):', selectedFiles.length);
-          return selectedFiles;
-        }
+      const treeSelection = this.collectSelectedFromTree(explorerView);
+      if (treeSelection.length > 0) {
+        this.logDebug('Found selected files (method 1):', treeSelection.length);
+        return treeSelection;
       }
 
-      console.log('[ImageLinkUpdater] No selected files found');
+      const classSelection = this.collectSelectedFromFileItems(explorerView.fileItems);
+      if (classSelection.length > 0) {
+        this.logDebug('Found selected files (method 2):', classSelection.length);
+        return classSelection;
+      }
+
+      this.logDebug('No selected files found');
       return [];
     } catch (error) {
       console.error('[ImageLinkUpdater] Error getting selected files:', error);
       return [];
     }
+  }
+
+  private getExplorerView(view: unknown): ExplorerView | null {
+    if (!view || typeof view !== 'object') {
+      return null;
+    }
+
+    const maybeView = view as { tree?: unknown; fileItems?: unknown };
+    const tree = maybeView.tree;
+    if (tree !== undefined && (typeof tree !== 'object' || tree === null)) {
+      return null;
+    }
+
+    const fileItems = maybeView.fileItems;
+    if (fileItems !== undefined && (typeof fileItems !== 'object' || fileItems === null)) {
+      return null;
+    }
+
+    return maybeView as ExplorerView;
+  }
+
+  private collectSelectedFromTree(view: ExplorerView): TFile[] {
+    const selected: TFile[] = [];
+    const selectedDoms = view.tree?.selectedDoms;
+    if (!Array.isArray(selectedDoms) || !view.fileItems) {
+      return selected;
+    }
+
+    for (const dom of selectedDoms) {
+      const path = this.getDatasetPath(dom);
+      if (!path) {
+        continue;
+      }
+
+      const file = this.getFileFromItem(view.fileItems[path]);
+      if (file) {
+        selected.push(file);
+      }
+    }
+
+    return selected;
+  }
+
+  private collectSelectedFromFileItems(items?: Record<string, ExplorerFileItem>): TFile[] {
+    if (!items) {
+      return [];
+    }
+
+    const selected: TFile[] = [];
+    for (const [path, item] of Object.entries(items)) {
+      if (!this.hasSelectedClass(item.selfEl)) {
+        continue;
+      }
+
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) {
+        selected.push(file);
+      }
+    }
+
+    return selected;
+  }
+
+  private getDatasetPath(dom: Element | undefined): string | null {
+    if (!dom) {
+      return null;
+    }
+
+    const dataset = (dom as Element & { dataset?: DOMStringMap }).dataset;
+    const path = dataset?.path;
+    return typeof path === 'string' ? path : null;
+  }
+
+  private hasSelectedClass(element: Element | undefined): boolean {
+    if (!element) {
+      return false;
+    }
+
+    const withHasClass = element as Element & { hasClass?(className: string): boolean };
+    if (typeof withHasClass.hasClass === 'function') {
+      return withHasClass.hasClass('is-selected');
+    }
+
+    return element.classList?.contains('is-selected') ?? false;
+  }
+
+  private getFileFromItem(item: ExplorerFileItem | undefined): TFile | null {
+    if (item?.file instanceof TFile) {
+      return item.file;
+    }
+    return null;
+  }
+
+  private getFileManager(): FileManagerLike | null {
+    const maybeApp = this.app as { fileManager?: unknown };
+    if (this.isFileManagerLike(maybeApp.fileManager)) {
+      return maybeApp.fileManager;
+    }
+    return null;
+  }
+
+  private isFileManagerLike(value: unknown): value is FileManagerLike {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const manager = value as FileManagerLike;
+    return (
+      typeof manager.getAttachmentFolderPath === 'function' ||
+      typeof manager.getNewFileParent === 'function'
+    );
   }
 
   /** Ensure a folder exists (skip if root or already exists) */
@@ -257,7 +378,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
         // Move the file
         await this.app.fileManager.renameFile(file, newPath);
-        console.log('[ImageLinkUpdater] Moved file:', oldPath, '->', newPath);
+        this.logDebug('Moved file:', oldPath, '->', newPath);
 
         // Update image links if it's an image file
         if (this.isImage(file)) {
@@ -307,7 +428,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
         // Move the file
         await this.app.fileManager.renameFile(file, newPath);
-        console.log('[ImageLinkUpdater] Moved file to root:', oldPath, '->', newPath);
+        this.logDebug('Moved file to root:', oldPath, '->', newPath);
 
         // Update image links if it's an image file
         if (this.isImage(file)) {
@@ -407,7 +528,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
       if (changed) {
         await this.app.vault.modify(md, updated);
-        console.log('[ImageLinkUpdater] updated file', { mdFile: md.path, to: abs });
+        this.logDebug('updated file', { mdFile: md.path, to: abs });
       }
     }
   }
@@ -439,7 +560,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
       if (changed) {
         await this.app.vault.modify(md, updated);
-        console.log('[ImageLinkUpdater] updated by filename', { mdFile: md.path, to: abs });
+        this.logDebug('updated by filename', { mdFile: md.path, to: abs });
       }
     }
   }
