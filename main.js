@@ -147,33 +147,80 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         console.debug('[ImageLinkUpdater]', ...data);
     }
     extractClipboardImages(dataTransfer) {
-        const dedup = new Map();
-        const register = (file) => {
-            if (!file)
-                return;
-            if (!file.type?.toLowerCase().startsWith('image/'))
-                return;
-            const key = `${file.name}__${file.size}__${file.lastModified}`;
-            if (!dedup.has(key)) {
-                dedup.set(key, file);
-            }
-        };
-        const items = dataTransfer.items;
-        if (items) {
-            for (let i = 0; i < items.length; i++) {
-                const item = items[i];
-                if (item.kind === 'file') {
-                    register(item.getAsFile());
-                }
+        const fromFiles = this.collectImagesFromFileList(dataTransfer.files);
+        if (fromFiles.length > 0) {
+            return this.deduplicateFiles(fromFiles);
+        }
+        const fromItems = this.collectImagesFromItems(dataTransfer.items);
+        return this.deduplicateFiles(fromItems);
+    }
+    collectImagesFromFileList(list) {
+        if (!list) {
+            return [];
+        }
+        const files = [];
+        for (let i = 0; i < list.length; i++) {
+            const file = list.item(i);
+            if (file && this.isImageBlob(file)) {
+                files.push(file);
             }
         }
-        const files = dataTransfer.files;
-        if (files) {
-            for (let i = 0; i < files.length; i++) {
-                register(files[i]);
+        return files;
+    }
+    collectImagesFromItems(items) {
+        if (!items) {
+            return [];
+        }
+        const files = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.kind !== 'file') {
+                continue;
+            }
+            const file = item.getAsFile();
+            if (file && this.isImageBlob(file)) {
+                files.push(file);
             }
         }
-        return Array.from(dedup.values());
+        return files;
+    }
+    deduplicateFiles(files) {
+        const seen = new Map();
+        for (const file of files) {
+            const key = `${file.type}__${file.size}`;
+            if (!seen.has(key)) {
+                seen.set(key, file);
+                continue;
+            }
+            const existing = seen.get(key);
+            if (!existing) {
+                seen.set(key, file);
+                continue;
+            }
+            if (existing === file) {
+                continue;
+            }
+            // If both entries report identical metadata, keep the one with a filename
+            if (existing.name && !file.name) {
+                continue;
+            }
+            if (!existing.name && file.name) {
+                seen.set(key, file);
+                continue;
+            }
+            if (existing.lastModified && !file.lastModified) {
+                continue;
+            }
+            if (!existing.lastModified && file.lastModified) {
+                seen.set(key, file);
+                continue;
+            }
+        }
+        return Array.from(seen.values());
+    }
+    isImageBlob(file) {
+        const type = file.type?.toLowerCase();
+        return typeof type === 'string' && type.startsWith('image/');
     }
     /**
      * Get currently selected files from file explorer
