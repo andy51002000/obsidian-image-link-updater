@@ -37,9 +37,11 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         }));
         // --- Clipboard image paste handler ---
         this.registerEvent(this.app.workspace.on('editor-paste', async (evt, editor) => {
-            const items = evt?.clipboardData?.items ? Array.from(evt.clipboardData.items) : [];
-            const imageItems = items.filter((i) => i.kind === 'file' && i.type?.startsWith('image/'));
-            if (imageItems.length === 0)
+            const dataTransfer = evt?.clipboardData;
+            if (!dataTransfer)
+                return;
+            const images = this.extractClipboardImages(dataTransfer);
+            if (images.length === 0)
                 return; // let Obsidian handle non-image
             evt.preventDefault(); // stop default ![[...]] paste
             const activeFile = this.app.workspace.getActiveFile();
@@ -49,10 +51,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             const folderPath = this.getNoteFolderPath(activeFile);
             // Ensure folder exists (no-op if it already does)
             await this.ensureFolderExists(folderPath);
-            for (const item of imageItems) {
-                const blob = item.getAsFile();
-                if (!blob)
-                    continue;
+            for (const blob of images) {
                 const ext = (blob.type.split('/')[1] || 'png').toLowerCase();
                 const base = `Pasted image ${this.timestamp()}`;
                 // Compute a unique vault-root path
@@ -146,6 +145,35 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             return;
         }
         console.debug('[ImageLinkUpdater]', ...data);
+    }
+    extractClipboardImages(dataTransfer) {
+        const dedup = new Map();
+        const register = (file) => {
+            if (!file)
+                return;
+            if (!file.type?.toLowerCase().startsWith('image/'))
+                return;
+            const key = `${file.name}__${file.size}__${file.lastModified}`;
+            if (!dedup.has(key)) {
+                dedup.set(key, file);
+            }
+        };
+        const items = dataTransfer.items;
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === 'file') {
+                    register(item.getAsFile());
+                }
+            }
+        }
+        const files = dataTransfer.files;
+        if (files) {
+            for (let i = 0; i < files.length; i++) {
+                register(files[i]);
+            }
+        }
+        return Array.from(dedup.values());
     }
     /**
      * Get currently selected files from file explorer
