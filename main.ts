@@ -63,8 +63,8 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return;
 
-        // Store pasted images alongside the active note
-        const folderPath = this.getNoteFolderPath(activeFile);
+        // Store pasted images alongside the active note or within a preferred subfolder
+        const folderPath = this.getPasteDestinationFolder(activeFile);
 
         // Ensure folder exists (no-op if it already does)
         await this.ensureFolderExists(folderPath);
@@ -418,6 +418,34 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     }
 
     return normalized;
+  }
+
+  /** Determine where pasted images should be stored based on folder preferences */
+  private getPasteDestinationFolder(file: TFile): string {
+    const baseFolderPath = this.getNoteFolderPath(file);
+    const parentFolder = file.parent ?? this.app.vault.getRoot();
+    const preferredFolders = ['assets', 'images'];
+
+    for (const folderName of preferredFolders) {
+      const match = this.findChildFolder(parentFolder, folderName);
+      if (match) {
+        return normalizePath(match.path);
+      }
+    }
+
+    return baseFolderPath;
+  }
+
+  private findChildFolder(parent: TFolder, name: string): TFolder | null {
+    const lower = name.toLowerCase();
+    const children = parent.children ?? [];
+    for (const child of children) {
+      if (child instanceof TFolder && child.name.toLowerCase() === lower) {
+        return child;
+      }
+    }
+
+    return null;
   }
 
   /** Ensure a folder exists (skip if root or already exists) */

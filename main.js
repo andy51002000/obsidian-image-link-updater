@@ -47,8 +47,8 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             const activeFile = this.app.workspace.getActiveFile();
             if (!activeFile)
                 return;
-            // Store pasted images alongside the active note
-            const folderPath = this.getNoteFolderPath(activeFile);
+            // Store pasted images alongside the active note or within a preferred subfolder
+            const folderPath = this.getPasteDestinationFolder(activeFile);
             // Ensure folder exists (no-op if it already does)
             await this.ensureFolderExists(folderPath);
             for (const blob of images) {
@@ -339,6 +339,29 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             return '';
         }
         return normalized;
+    }
+    /** Determine where pasted images should be stored based on folder preferences */
+    getPasteDestinationFolder(file) {
+        const baseFolderPath = this.getNoteFolderPath(file);
+        const parentFolder = file.parent ?? this.app.vault.getRoot();
+        const preferredFolders = ['assets', 'images'];
+        for (const folderName of preferredFolders) {
+            const match = this.findChildFolder(parentFolder, folderName);
+            if (match) {
+                return obsidian.normalizePath(match.path);
+            }
+        }
+        return baseFolderPath;
+    }
+    findChildFolder(parent, name) {
+        const lower = name.toLowerCase();
+        const children = parent.children ?? [];
+        for (const child of children) {
+            if (child instanceof obsidian.TFolder && child.name.toLowerCase() === lower) {
+                return child;
+            }
+        }
+        return null;
     }
     /** Ensure a folder exists (skip if root or already exists) */
     async ensureFolderExists(folderPath) {

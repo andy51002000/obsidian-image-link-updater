@@ -8,7 +8,7 @@ Update every image link in your vault **automatically**.
 
 
 * 🔄 **Drag / Rename** an image in Obsidian File Explorer → every `![…](…)` or `![[…]]` reference is rewritten to the new vault‑root path.
-* 📋 **Paste** an image from the clipboard → stored alongside the active note and inserted as **Markdown** `![](<path>)` (instead of the default wiki link).
+* 📋 **Paste** an image from the clipboard → stored in a nearby `assets/` (or `images/`) folder when available, otherwise beside the active note, and inserted as **Markdown** `![](<path>)` (instead of the default wiki link).
 * ✂️ **Cut & Paste** files with context menu → move single or multiple files and automatically update all image links.
 * 🗃 **Fallback for OS moves** (delete + create events) – if you move images outside Obsidian, links are still fixed by filename.
 
@@ -112,7 +112,7 @@ When you move or rename image files, the plugin:
 ### Clipboard Image Handling
 When you paste an image:
 1. Intercepts the paste event
-2. Saves the image to the same folder as the active note
+2. Saves the image to an `assets/` or `images/` subfolder (if present) or the note's own folder
 3. Inserts a Markdown link with URI-encoded path
 4. Ensures proper leading slash for vault-root paths
 
@@ -128,7 +128,7 @@ When you cut and paste files:
 ## Configuration
 
 The plugin respects your Obsidian settings:
-- **Image location**: Clipboard images are saved beside the active note
+- **Image location**: Clipboard images target `assets/` (then `images/`) within the note's folder when available, otherwise they are saved beside the note
 - **File naming**: Follows Obsidian's naming conventions
 - **Link format**: Generates Markdown links for pasted images
 
