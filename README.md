@@ -8,7 +8,7 @@ Update every image link in your vault **automatically**.
 
 
 * 🔄 **Drag / Rename** an image in Obsidian File Explorer → every `![…](…)` or `![[…]]` reference is rewritten to the new vault‑root path.
-* 📋 **Paste** an image from the clipboard → stored in your attachment folder and inserted as **Markdown** `![](<path>)` (instead of the default wiki link).
+* 📋 **Paste** an image from the clipboard → stored alongside the active note and inserted as **Markdown** `![](<path>)` (instead of the default wiki link).
 * ✂️ **Cut & Paste** files with context menu → move single or multiple files and automatically update all image links.
 * 🗃 **Fallback for OS moves** (delete + create events) – if you move images outside Obsidian, links are still fixed by filename.
 
@@ -28,7 +28,7 @@ Update every image link in your vault **automatically**.
 | Action                    | Before                                    | After                                             |
 | ------------------------- | ----------------------------------------- | ------------------------------------------------- |
 | **Move / Rename** image   | `![Alt](assets/img.png)`                  | `![Alt](Docs/assets/img.png)`                     |
-| **Paste** image           | *Default Obsidian*: `![[Pasted image …]]` | *Plugin*: `![](Images/Pasted%20image%202025…png)` |
+| **Paste** image           | *Default Obsidian*: `![[Pasted image …]]` | *Plugin*: `![](Docs/Note/Pasted%20image%202025…png)` |
 | **Cut & Paste** files     | Manual drag with broken links             | Right-click cut/paste with auto-updated links     |
 | **Move outside Obsidian** | `![](foo.png)` *(broken)*                 | `![](NewFolder/foo.png)`                          |
 
@@ -112,7 +112,7 @@ When you move or rename image files, the plugin:
 ### Clipboard Image Handling
 When you paste an image:
 1. Intercepts the paste event
-2. Saves the image to your configured attachment folder
+2. Saves the image to the same folder as the active note
 3. Inserts a Markdown link with URI-encoded path
 4. Ensures proper leading slash for vault-root paths
 
@@ -128,7 +128,7 @@ When you cut and paste files:
 ## Configuration
 
 The plugin respects your Obsidian settings:
-- **Attachment folder**: Uses your configured attachment folder path
+- **Image location**: Clipboard images are saved beside the active note
 - **File naming**: Follows Obsidian's naming conventions
 - **Link format**: Generates Markdown links for pasted images
 

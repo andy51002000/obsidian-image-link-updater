@@ -1,10 +1,5 @@
 import { Plugin, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
 
-type FileManagerLike = {
-  getAttachmentFolderPath?(file: TFile): string;
-  getNewFileParent?(path: string): TFolder | null;
-};
-
 type ExplorerFileItem = {
   file?: TFile;
   selfEl?: Element & { hasClass?(className: string): boolean };
@@ -66,17 +61,8 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return;
 
-        // Determine destination folder for attachments
-        let folderPath: string;
-        const fm = this.getFileManager();
-        if (fm?.getAttachmentFolderPath) {
-          folderPath = normalizePath(fm.getAttachmentFolderPath(activeFile));
-        } else if (fm?.getNewFileParent) {
-          const parent = fm.getNewFileParent(activeFile.path);
-          folderPath = normalizePath(parent?.path ?? '/');
-        } else {
-          folderPath = normalizePath('/');
-        }
+        // Store pasted images alongside the active note
+        const folderPath = this.getNoteFolderPath(activeFile);
 
         // Ensure folder exists (no-op if it already does)
         await this.ensureFolderExists(folderPath);
@@ -88,7 +74,8 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           const base = `Pasted image ${this.timestamp()}`;
 
           // Compute a unique vault-root path
-          let dest = normalizePath(`${folderPath}/${base}.${ext}`);
+          const folderPrefix = folderPath ? `${folderPath}/` : '';
+          let dest = normalizePath(`${folderPrefix}${base}.${ext}`);
           dest = await this.uniquePath(dest, base, ext, folderPath);
 
           const arrayBuf = await blob.arrayBuffer();
@@ -323,28 +310,25 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     return null;
   }
 
-  private getFileManager(): FileManagerLike | null {
-    const maybeApp = this.app as { fileManager?: unknown };
-    if (this.isFileManagerLike(maybeApp.fileManager)) {
-      return maybeApp.fileManager;
-    }
-    return null;
-  }
-
-  private isFileManagerLike(value: unknown): value is FileManagerLike {
-    if (!value || typeof value !== 'object') {
-      return false;
+  /** Determine the folder path for the provided note */
+  private getNoteFolderPath(file: TFile): string {
+    const parent = file.parent;
+    if (!parent) {
+      return '';
     }
 
-    const manager = value as FileManagerLike;
-    return (
-      typeof manager.getAttachmentFolderPath === 'function' ||
-      typeof manager.getNewFileParent === 'function'
-    );
+    const normalized = normalizePath(parent.path);
+    if (!normalized || normalized === '/' || normalized === '.') {
+      return '';
+    }
+
+    return normalized;
   }
 
   /** Ensure a folder exists (skip if root or already exists) */
   private async ensureFolderExists(folderPath: string) {
+    if (!folderPath) return;
+
     const normalized = normalizePath(folderPath);
     if (!normalized || normalized === '/') return;
     try {

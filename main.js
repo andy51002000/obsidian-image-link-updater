@@ -45,19 +45,8 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             const activeFile = this.app.workspace.getActiveFile();
             if (!activeFile)
                 return;
-            // Determine destination folder for attachments
-            let folderPath;
-            const fm = this.getFileManager();
-            if (fm?.getAttachmentFolderPath) {
-                folderPath = obsidian.normalizePath(fm.getAttachmentFolderPath(activeFile));
-            }
-            else if (fm?.getNewFileParent) {
-                const parent = fm.getNewFileParent(activeFile.path);
-                folderPath = obsidian.normalizePath(parent?.path ?? '/');
-            }
-            else {
-                folderPath = obsidian.normalizePath('/');
-            }
+            // Store pasted images alongside the active note
+            const folderPath = this.getNoteFolderPath(activeFile);
             // Ensure folder exists (no-op if it already does)
             await this.ensureFolderExists(folderPath);
             for (const item of imageItems) {
@@ -67,7 +56,8 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
                 const ext = (blob.type.split('/')[1] || 'png').toLowerCase();
                 const base = `Pasted image ${this.timestamp()}`;
                 // Compute a unique vault-root path
-                let dest = obsidian.normalizePath(`${folderPath}/${base}.${ext}`);
+                const folderPrefix = folderPath ? `${folderPath}/` : '';
+                let dest = obsidian.normalizePath(`${folderPrefix}${base}.${ext}`);
                 dest = await this.uniquePath(dest, base, ext, folderPath);
                 const arrayBuf = await blob.arrayBuffer();
                 await this.app.vault.createBinary(dest, arrayBuf);
@@ -263,23 +253,22 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         }
         return null;
     }
-    getFileManager() {
-        const maybeApp = this.app;
-        if (this.isFileManagerLike(maybeApp.fileManager)) {
-            return maybeApp.fileManager;
+    /** Determine the folder path for the provided note */
+    getNoteFolderPath(file) {
+        const parent = file.parent;
+        if (!parent) {
+            return '';
         }
-        return null;
-    }
-    isFileManagerLike(value) {
-        if (!value || typeof value !== 'object') {
-            return false;
+        const normalized = obsidian.normalizePath(parent.path);
+        if (!normalized || normalized === '/' || normalized === '.') {
+            return '';
         }
-        const manager = value;
-        return (typeof manager.getAttachmentFolderPath === 'function' ||
-            typeof manager.getNewFileParent === 'function');
+        return normalized;
     }
     /** Ensure a folder exists (skip if root or already exists) */
     async ensureFolderExists(folderPath) {
+        if (!folderPath)
+            return;
         const normalized = obsidian.normalizePath(folderPath);
         if (!normalized || normalized === '/')
             return;
