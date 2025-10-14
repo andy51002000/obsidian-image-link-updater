@@ -1,4 +1,14 @@
-import { Plugin, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
+import {
+  Plugin,
+  App,
+  TFile,
+  TFolder,
+  normalizePath,
+  Editor,
+  Notice,
+  PluginSettingTab,
+  Setting,
+} from 'obsidian';
 
 type ExplorerFileItem = {
   file?: TFile;
@@ -10,6 +20,17 @@ type ExplorerView = {
     selectedDoms?: Array<Element & { dataset?: DOMStringMap }>;
   };
   fileItems?: Record<string, ExplorerFileItem>;
+};
+
+interface ImageLinkUpdaterSettings {
+  /**
+   * If true, pasted images will be routed into existing assets/ or images/ subfolders.
+   */
+  preferPasteSubfolders: boolean;
+}
+
+const DEFAULT_SETTINGS: ImageLinkUpdaterSettings = {
+  preferPasteSubfolders: true,
 };
 
 /**
@@ -27,8 +48,12 @@ type ExplorerView = {
 export default class ImageLinkUpdaterPlugin extends Plugin {
   private cutFiles: TFile[] = []; // Store multiple files that were cut
   private readonly debugEnabled = false;
+  settings: ImageLinkUpdaterSettings = { ...DEFAULT_SETTINGS };
 
   async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new ImageLinkUpdaterSettingTab(this.app, this));
+
     // --- Rename/Move handler ---
     this.registerEvent(
       this.app.vault.on('rename', (file, oldPath) => {
@@ -424,6 +449,9 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   private getPasteDestinationFolder(file: TFile): string {
     const baseFolderPath = this.getNoteFolderPath(file);
     const parentFolder = file.parent ?? this.app.vault.getRoot();
+    if (!this.settings.preferPasteSubfolders) {
+      return baseFolderPath;
+    }
     const preferredFolders = ['assets', 'images'];
 
     for (const folderName of preferredFolders) {
@@ -694,5 +722,39 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       attempt++;
     }
     return candidate;
+  }
+
+  async loadSettings(): Promise<void> {
+    const data = await this.loadData();
+    this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
+  }
+}
+
+class ImageLinkUpdaterSettingTab extends PluginSettingTab {
+  constructor(app: App, private readonly plugin: ImageLinkUpdaterPlugin) {
+    super(app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    containerEl.createEl('h2', { text: 'Image Link Updater' });
+
+    new Setting(containerEl)
+      .setName('Prefer assets/images subfolders for pasted images')
+      .setDesc('If enabled, pasted images are saved into existing assets or images subfolders beside the note.')
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.preferPasteSubfolders)
+          .onChange(async (value) => {
+            this.plugin.settings.preferPasteSubfolders = value;
+            await this.plugin.saveSettings();
+          })
+      );
   }
 }

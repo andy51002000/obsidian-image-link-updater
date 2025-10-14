@@ -2,6 +2,9 @@
 
 var obsidian = require('obsidian');
 
+const DEFAULT_SETTINGS = {
+    preferPasteSubfolders: true,
+};
 /**
  * Features:
  * 1) On image rename/move (via Obsidian File Explorer), rewrite all references to
@@ -19,8 +22,11 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         super(...arguments);
         this.cutFiles = []; // Store multiple files that were cut
         this.debugEnabled = false;
+        this.settings = { ...DEFAULT_SETTINGS };
     }
     async onload() {
+        await this.loadSettings();
+        this.addSettingTab(new ImageLinkUpdaterSettingTab(this.app, this));
         // --- Rename/Move handler ---
         this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
             if (file instanceof obsidian.TFile && this.isImage(file)) {
@@ -344,6 +350,9 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
     getPasteDestinationFolder(file) {
         const baseFolderPath = this.getNoteFolderPath(file);
         const parentFolder = file.parent ?? this.app.vault.getRoot();
+        if (!this.settings.preferPasteSubfolders) {
+            return baseFolderPath;
+        }
         const preferredFolders = ['assets', 'images'];
         for (const folderName of preferredFolders) {
             const match = this.findChildFolder(parentFolder, folderName);
@@ -567,6 +576,33 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
             attempt++;
         }
         return candidate;
+    }
+    async loadSettings() {
+        const data = await this.loadData();
+        this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
+    }
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
+}
+class ImageLinkUpdaterSettingTab extends obsidian.PluginSettingTab {
+    constructor(app, plugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+    display() {
+        const { containerEl } = this;
+        containerEl.empty();
+        containerEl.createEl('h2', { text: 'Image Link Updater' });
+        new obsidian.Setting(containerEl)
+            .setName('Prefer assets/images subfolders for pasted images')
+            .setDesc('If enabled, pasted images are saved into existing assets or images subfolders beside the note.')
+            .addToggle((toggle) => toggle
+            .setValue(this.plugin.settings.preferPasteSubfolders)
+            .onChange(async (value) => {
+            this.plugin.settings.preferPasteSubfolders = value;
+            await this.plugin.saveSettings();
+        }));
     }
 }
 
