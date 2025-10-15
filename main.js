@@ -499,14 +499,22 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
     async updateImageLinks(oldPath, newPath) {
         const mdFiles = this.app.vault.getMarkdownFiles();
         const oldFileName = oldPath.split('/').pop() ?? '';
+        const newFileName = newPath.split('/').pop() ?? '';
         // Build raw and encoded variants for both path and file name
         const oldPathNorm = obsidian.normalizePath(oldPath);
         const oldPathEnc = encodeURI(oldPathNorm);
         const oldNameEnc = encodeURI(oldFileName);
+        const newPathNorm = obsidian.normalizePath(newPath);
+        const newPathEnc = encodeURI(newPathNorm);
+        const newNameEnc = encodeURI(newFileName);
         const escapedOldPath = this.escapeRegExp(oldPathNorm);
         const escapedOldPathEnc = this.escapeRegExp(oldPathEnc);
         const escapedOldName = this.escapeRegExp(oldFileName);
         const escapedOldNameEnc = this.escapeRegExp(oldNameEnc);
+        const escapedNewPath = this.escapeRegExp(newPathNorm);
+        const escapedNewPathEnc = this.escapeRegExp(newPathEnc);
+        const escapedNewName = this.escapeRegExp(newFileName);
+        const escapedNewNameEnc = this.escapeRegExp(newNameEnc);
         // 確保新路徑以 / 開頭
         const abs = this.ensureLeadingSlash(newPath); // vault-root absolute path
         const absMd = encodeURI(abs); // encoded for Markdown
@@ -518,20 +526,59 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         // Wiki links use raw (unencoded) text inside [[...]]
         const wikiFull = new RegExp(String.raw `!\[\[(?:[^\]]*?)${escapedOldPath}\]\]`, 'gi');
         const wikiByName = new RegExp(String.raw `!\[\[[^\]]*${escapedOldName}\]\]`, 'gi');
+        // Patterns for ensuring the new path is absolute when Obsidian rewrites links to be relative
+        const mdNewFull = new RegExp(String.raw `!\[(.*?)\]\(<?(?:/${escapedNewPath}|/${escapedNewPathEnc}|${escapedNewPath}|${escapedNewPathEnc})>?\)`, 'gi');
+        const mdNewByName = new RegExp(String.raw `!\[(.*?)\]\(<?[^)]*(?:${escapedNewName}|${escapedNewNameEnc})[^)]*>?\)`, 'gi');
+        const wikiNewByName = new RegExp(String.raw `!\[\[[^\]]*${escapedNewName}\]\]`, 'gi');
         for (const md of mdFiles) {
             const content = await this.app.vault.read(md);
             let changed = false;
+            const replaceWithAbsoluteMd = (match, alt) => {
+                const replacement = `![${alt}](${absMd})`;
+                if (match === replacement) {
+                    return match;
+                }
+                changed = true;
+                return replacement;
+            };
+            const replaceWithAbsoluteWiki = (match) => {
+                const replacement = `![[${abs}]]`;
+                if (match === replacement) {
+                    return match;
+                }
+                changed = true;
+                return replacement;
+            };
             let updated = content
-                .replace(mdFull, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
-                .replace(mdByName, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
+                .replace(mdFull, replaceWithAbsoluteMd)
+                .replace(mdByName, replaceWithAbsoluteMd)
                 // Wiki links keep spaces unencoded
-                .replace(wikiFull, () => { changed = true; return `![[${abs}]]`; })
-                .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
+                .replace(wikiFull, replaceWithAbsoluteWiki)
+                .replace(wikiByName, replaceWithAbsoluteWiki);
+            if (this.linksToPath(md.path, newPath)) {
+                updated = updated
+                    .replace(mdNewFull, replaceWithAbsoluteMd)
+                    .replace(mdNewByName, replaceWithAbsoluteMd)
+                    .replace(wikiNewByName, replaceWithAbsoluteWiki);
+            }
             if (changed) {
                 await this.app.vault.modify(md, updated);
                 this.logDebug('updated file', { mdFile: md.path, to: abs });
             }
         }
+    }
+    linksToPath(sourcePath, targetPath) {
+        const resolved = this.app.metadataCache.resolvedLinks;
+        if (!resolved) {
+            return false;
+        }
+        const source = obsidian.normalizePath(sourcePath);
+        const target = obsidian.normalizePath(targetPath);
+        const targets = resolved[source];
+        if (!targets) {
+            return false;
+        }
+        return (targets[target] ?? 0) > 0;
     }
     /** Update links by file name only (used on create fallback) */
     async updateImageLinksByFilename(fileName, newPath) {
