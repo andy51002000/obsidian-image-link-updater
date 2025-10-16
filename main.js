@@ -4,6 +4,7 @@ var obsidian = require('obsidian');
 
 const DEFAULT_SETTINGS = {
     preferPasteSubfolders: true,
+    preferredPasteSubfolder: '',
 };
 /**
  * Features:
@@ -353,7 +354,16 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         if (!this.settings.preferPasteSubfolders) {
             return baseFolderPath;
         }
-        const preferredFolders = ['assets', 'images'];
+        const preferredFolders = [];
+        const custom = this.settings.preferredPasteSubfolder?.trim();
+        if (custom) {
+            preferredFolders.push(custom);
+        }
+        for (const fallback of ['assets', 'images']) {
+            if (!preferredFolders.some((name) => name.toLowerCase() === fallback)) {
+                preferredFolders.push(fallback);
+            }
+        }
         for (const folderName of preferredFolders) {
             const match = this.findChildFolder(parentFolder, folderName);
             if (match) {
@@ -648,6 +658,16 @@ class ImageLinkUpdaterSettingTab extends obsidian.PluginSettingTab {
             .setValue(this.plugin.settings.preferPasteSubfolders)
             .onChange(async (value) => {
             this.plugin.settings.preferPasteSubfolders = value;
+            await this.plugin.saveSettings();
+        }));
+        new obsidian.Setting(containerEl)
+            .setName('Preferred subfolder name')
+            .setDesc('Optional. When set, pasted images first try this subfolder inside the note folder before assets/images.')
+            .addText((text) => text
+            .setPlaceholder('e.g. img')
+            .setValue(this.plugin.settings.preferredPasteSubfolder ?? '')
+            .onChange(async (value) => {
+            this.plugin.settings.preferredPasteSubfolder = value.trim();
             await this.plugin.saveSettings();
         }));
     }

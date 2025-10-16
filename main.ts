@@ -27,10 +27,15 @@ interface ImageLinkUpdaterSettings {
    * If true, pasted images will be routed into existing assets/ or images/ subfolders.
    */
   preferPasteSubfolders: boolean;
+  /**
+   * Optional user-provided subfolder name to prefer before assets/images.
+   */
+  preferredPasteSubfolder: string;
 }
 
 const DEFAULT_SETTINGS: ImageLinkUpdaterSettings = {
   preferPasteSubfolders: true,
+  preferredPasteSubfolder: '',
 };
 
 /**
@@ -452,7 +457,16 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     if (!this.settings.preferPasteSubfolders) {
       return baseFolderPath;
     }
-    const preferredFolders = ['assets', 'images'];
+    const preferredFolders: string[] = [];
+    const custom = this.settings.preferredPasteSubfolder?.trim();
+    if (custom) {
+      preferredFolders.push(custom);
+    }
+    for (const fallback of ['assets', 'images']) {
+      if (!preferredFolders.some((name) => name.toLowerCase() === fallback)) {
+        preferredFolders.push(fallback);
+      }
+    }
 
     for (const folderName of preferredFolders) {
       const match = this.findChildFolder(parentFolder, folderName);
@@ -815,6 +829,19 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.preferPasteSubfolders)
           .onChange(async (value) => {
             this.plugin.settings.preferPasteSubfolders = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Preferred subfolder name')
+      .setDesc('Optional. When set, pasted images first try this subfolder inside the note folder before assets/images.')
+      .addText((text) =>
+        text
+          .setPlaceholder('e.g. img')
+          .setValue(this.plugin.settings.preferredPasteSubfolder ?? '')
+          .onChange(async (value) => {
+            this.plugin.settings.preferredPasteSubfolder = value.trim();
             await this.plugin.saveSettings();
           })
       );
