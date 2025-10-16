@@ -652,7 +652,7 @@ class ImageLinkUpdaterSettingTab extends obsidian.PluginSettingTab {
         containerEl.empty();
         containerEl.createEl('h2', { text: 'Image Link Updater' });
         new obsidian.Setting(containerEl)
-            .setName('Prefer assets/images subfolders for pasted images')
+            .setName('Prefer assets or images subfolders for pasted images')
             .setDesc('If enabled, pasted images are saved into existing assets or images subfolders beside the note.')
             .addToggle((toggle) => toggle
             .setValue(this.plugin.settings.preferPasteSubfolders)
@@ -662,7 +662,7 @@ class ImageLinkUpdaterSettingTab extends obsidian.PluginSettingTab {
         }));
         new obsidian.Setting(containerEl)
             .setName('Preferred subfolder name')
-            .setDesc('Optional. When set, pasted images first try this subfolder inside the note folder before assets/images.')
+            .setDesc('Optional. When set, pasted images first try this subfolder inside the note folder before assets or images.')
             .addText((text) => text
             .setPlaceholder('e.g. img')
             .setValue(this.plugin.settings.preferredPasteSubfolder ?? '')

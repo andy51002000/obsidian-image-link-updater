@@ -24,11 +24,11 @@ type ExplorerView = {
 
 interface ImageLinkUpdaterSettings {
   /**
-   * If true, pasted images will be routed into existing assets/ or images/ subfolders.
+   * If true, pasted images will be routed into existing assets or images subfolders.
    */
   preferPasteSubfolders: boolean;
   /**
-   * Optional user-provided subfolder name to prefer before assets/images.
+   * Optional user-provided subfolder name to prefer before assets or images.
    */
   preferredPasteSubfolder: string;
 }
@@ -822,7 +822,7 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
     containerEl.createEl('h2', { text: 'Image Link Updater' });
 
     new Setting(containerEl)
-      .setName('Prefer assets/images subfolders for pasted images')
+      .setName('Prefer assets or images subfolders for pasted images')
       .setDesc('If enabled, pasted images are saved into existing assets or images subfolders beside the note.')
       .addToggle((toggle) =>
         toggle
@@ -835,7 +835,7 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Preferred subfolder name')
-      .setDesc('Optional. When set, pasted images first try this subfolder inside the note folder before assets/images.')
+      .setDesc('Optional. When set, pasted images first try this subfolder inside the note folder before assets or images.')
       .addText((text) =>
         text
           .setPlaceholder('e.g. img')

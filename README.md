@@ -129,7 +129,7 @@ When you cut and paste files:
 
 Open **Settings → Community plugins → Image Link Updater** to customise the workflow:
 
-- **Prefer assets/images subfolders** *(default: on)* – When enabled, clipboard images target your preferred subfolder within the note's folder, then `assets/`, then `images/`, before falling back to the note itself.
+- **Prefer assets or images subfolders** *(default: on)* – When enabled, clipboard images target your preferred subfolder within the note's folder, then `assets/`, then `images/`, before falling back to the note itself.
 - **Preferred subfolder name** – Optional text field. Provide a folder name (e.g. `img`) to make it the first destination when saving pasted images beside the note.
 - **File naming**: Follows Obsidian's naming conventions
 - **Link format**: Generates Markdown links for pasted images
