@@ -1,9 +1,14 @@
-import { Plugin, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
-
-type FileManagerLike = {
-  getAttachmentFolderPath?(file: TFile): string;
-  getNewFileParent?(path: string): TFolder | null;
-};
+import {
+  Plugin,
+  App,
+  TFile,
+  TFolder,
+  normalizePath,
+  Editor,
+  Notice,
+  PluginSettingTab,
+  Setting,
+} from 'obsidian';
 
 type ExplorerFileItem = {
   file?: TFile;
@@ -15,6 +20,22 @@ type ExplorerView = {
     selectedDoms?: Array<Element & { dataset?: DOMStringMap }>;
   };
   fileItems?: Record<string, ExplorerFileItem>;
+};
+
+interface ImageLinkUpdaterSettings {
+  /**
+   * If true, pasted images will be routed into existing assets or images subfolders.
+   */
+  preferPasteSubfolders: boolean;
+  /**
+   * Optional user-provided subfolder name to prefer before assets or images.
+   */
+  preferredPasteSubfolder: string;
+}
+
+const DEFAULT_SETTINGS: ImageLinkUpdaterSettings = {
+  preferPasteSubfolders: true,
+  preferredPasteSubfolder: '',
 };
 
 /**
@@ -32,8 +53,12 @@ type ExplorerView = {
 export default class ImageLinkUpdaterPlugin extends Plugin {
   private cutFiles: TFile[] = []; // Store multiple files that were cut
   private readonly debugEnabled = false;
+  settings: ImageLinkUpdaterSettings = { ...DEFAULT_SETTINGS };
 
   async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new ImageLinkUpdaterSettingTab(this.app, this));
+
     // --- Rename/Move handler ---
     this.registerEvent(
       this.app.vault.on('rename', (file, oldPath) => {
@@ -57,38 +82,30 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     // --- Clipboard image paste handler ---
     this.registerEvent(
       this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor: Editor) => {
-        const items = evt?.clipboardData?.items ? Array.from(evt.clipboardData.items) : [];
-        const imageItems = items.filter((i) => i.kind === 'file' && i.type?.startsWith('image/'));
-        if (imageItems.length === 0) return; // let Obsidian handle non-image
+        const dataTransfer = evt?.clipboardData;
+        if (!dataTransfer) return;
+
+        const images = this.extractClipboardImages(dataTransfer);
+        if (images.length === 0) return; // let Obsidian handle non-image
 
         evt.preventDefault(); // stop default ![[...]] paste
 
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return;
 
-        // Determine destination folder for attachments
-        let folderPath: string;
-        const fm = this.getFileManager();
-        if (fm?.getAttachmentFolderPath) {
-          folderPath = normalizePath(fm.getAttachmentFolderPath(activeFile));
-        } else if (fm?.getNewFileParent) {
-          const parent = fm.getNewFileParent(activeFile.path);
-          folderPath = normalizePath(parent?.path ?? '/');
-        } else {
-          folderPath = normalizePath('/');
-        }
+        // Store pasted images alongside the active note or within a preferred subfolder
+        const folderPath = this.getPasteDestinationFolder(activeFile);
 
         // Ensure folder exists (no-op if it already does)
         await this.ensureFolderExists(folderPath);
 
-        for (const item of imageItems) {
-          const blob = item.getAsFile();
-          if (!blob) continue;
+        for (const blob of images) {
           const ext = (blob.type.split('/')[1] || 'png').toLowerCase();
           const base = `Pasted image ${this.timestamp()}`;
 
           // Compute a unique vault-root path
-          let dest = normalizePath(`${folderPath}/${base}.${ext}`);
+          const folderPrefix = folderPath ? `${folderPath}/` : '';
+          let dest = normalizePath(`${folderPrefix}${base}.${ext}`);
           dest = await this.uniquePath(dest, base, ext, folderPath);
 
           const arrayBuf = await blob.arrayBuffer();
@@ -193,6 +210,101 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       return;
     }
     console.debug('[ImageLinkUpdater]', ...data);
+  }
+
+  private extractClipboardImages(dataTransfer: DataTransfer): File[] {
+    const fromFiles = this.collectImagesFromFileList(dataTransfer.files);
+    if (fromFiles.length > 0) {
+      return this.deduplicateFiles(fromFiles);
+    }
+
+    const fromItems = this.collectImagesFromItems(dataTransfer.items);
+    return this.deduplicateFiles(fromItems);
+  }
+
+  private collectImagesFromFileList(list: FileList | null): File[] {
+    if (!list) {
+      return [];
+    }
+
+    const files: File[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const file = list.item(i);
+      if (file && this.isImageBlob(file)) {
+        files.push(file);
+      }
+    }
+
+    return files;
+  }
+
+  private collectImagesFromItems(items: DataTransferItemList | null): File[] {
+    if (!items) {
+      return [];
+    }
+
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind !== 'file') {
+        continue;
+      }
+
+      const file = item.getAsFile();
+      if (file && this.isImageBlob(file)) {
+        files.push(file);
+      }
+    }
+
+    return files;
+  }
+
+  private deduplicateFiles(files: File[]): File[] {
+    const seen = new Map<string, File>();
+
+    for (const file of files) {
+      const key = `${file.type}__${file.size}`;
+      if (!seen.has(key)) {
+        seen.set(key, file);
+        continue;
+      }
+
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, file);
+        continue;
+      }
+
+      if (existing === file) {
+        continue;
+      }
+
+      // If both entries report identical metadata, keep the one with a filename
+      if (existing.name && !file.name) {
+        continue;
+      }
+
+      if (!existing.name && file.name) {
+        seen.set(key, file);
+        continue;
+      }
+
+      if (existing.lastModified && !file.lastModified) {
+        continue;
+      }
+
+      if (!existing.lastModified && file.lastModified) {
+        seen.set(key, file);
+        continue;
+      }
+    }
+
+    return Array.from(seen.values());
+  }
+
+  private isImageBlob(file: File): boolean {
+    const type = file.type?.toLowerCase();
+    return typeof type === 'string' && type.startsWith('image/');
   }
 
   /**
@@ -323,28 +435,65 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     return null;
   }
 
-  private getFileManager(): FileManagerLike | null {
-    const maybeApp = this.app as { fileManager?: unknown };
-    if (this.isFileManagerLike(maybeApp.fileManager)) {
-      return maybeApp.fileManager;
+  /** Determine the folder path for the provided note */
+  private getNoteFolderPath(file: TFile): string {
+    const parent = file.parent;
+    if (!parent) {
+      return '';
     }
-    return null;
+
+    const normalized = normalizePath(parent.path);
+    if (!normalized || normalized === '/' || normalized === '.') {
+      return '';
+    }
+
+    return normalized;
   }
 
-  private isFileManagerLike(value: unknown): value is FileManagerLike {
-    if (!value || typeof value !== 'object') {
-      return false;
+  /** Determine where pasted images should be stored based on folder preferences */
+  private getPasteDestinationFolder(file: TFile): string {
+    const baseFolderPath = this.getNoteFolderPath(file);
+    const parentFolder = file.parent ?? this.app.vault.getRoot();
+    if (!this.settings.preferPasteSubfolders) {
+      return baseFolderPath;
+    }
+    const preferredFolders: string[] = [];
+    const custom = this.settings.preferredPasteSubfolder?.trim();
+    if (custom) {
+      preferredFolders.push(custom);
+    }
+    for (const fallback of ['assets', 'images']) {
+      if (!preferredFolders.some((name) => name.toLowerCase() === fallback)) {
+        preferredFolders.push(fallback);
+      }
     }
 
-    const manager = value as FileManagerLike;
-    return (
-      typeof manager.getAttachmentFolderPath === 'function' ||
-      typeof manager.getNewFileParent === 'function'
-    );
+    for (const folderName of preferredFolders) {
+      const match = this.findChildFolder(parentFolder, folderName);
+      if (match) {
+        return normalizePath(match.path);
+      }
+    }
+
+    return baseFolderPath;
+  }
+
+  private findChildFolder(parent: TFolder, name: string): TFolder | null {
+    const lower = name.toLowerCase();
+    const children = parent.children ?? [];
+    for (const child of children) {
+      if (child instanceof TFolder && child.name.toLowerCase() === lower) {
+        return child;
+      }
+    }
+
+    return null;
   }
 
   /** Ensure a folder exists (skip if root or already exists) */
   private async ensureFolderExists(folderPath: string) {
+    if (!folderPath) return;
+
     const normalized = normalizePath(folderPath);
     if (!normalized || normalized === '/') return;
     try {
@@ -485,16 +634,26 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     const mdFiles = this.app.vault.getMarkdownFiles();
 
     const oldFileName = oldPath.split('/').pop() ?? '';
+    const newFileName = newPath.split('/').pop() ?? '';
 
     // Build raw and encoded variants for both path and file name
     const oldPathNorm = normalizePath(oldPath);
     const oldPathEnc = encodeURI(oldPathNorm);
     const oldNameEnc = encodeURI(oldFileName);
 
+    const newPathNorm = normalizePath(newPath);
+    const newPathEnc = encodeURI(newPathNorm);
+    const newNameEnc = encodeURI(newFileName);
+
     const escapedOldPath = this.escapeRegExp(oldPathNorm);
     const escapedOldPathEnc = this.escapeRegExp(oldPathEnc);
     const escapedOldName = this.escapeRegExp(oldFileName);
     const escapedOldNameEnc = this.escapeRegExp(oldNameEnc);
+
+    const escapedNewPath = this.escapeRegExp(newPathNorm);
+    const escapedNewPathEnc = this.escapeRegExp(newPathEnc);
+    const escapedNewName = this.escapeRegExp(newFileName);
+    const escapedNewNameEnc = this.escapeRegExp(newNameEnc);
 
     // 確保新路徑以 / 開頭
     const abs = this.ensureLeadingSlash(newPath);      // vault-root absolute path
@@ -515,22 +674,74 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     const wikiFull   = new RegExp(String.raw`!\[\[(?:[^\]]*?)${escapedOldPath}\]\]`, 'gi');
     const wikiByName = new RegExp(String.raw`!\[\[[^\]]*${escapedOldName}\]\]`, 'gi');
 
+    // Patterns for ensuring the new path is absolute when Obsidian rewrites links to be relative
+    const mdNewFull = new RegExp(
+      String.raw`!\[(.*?)\]\(<?(?:/${escapedNewPath}|/${escapedNewPathEnc}|${escapedNewPath}|${escapedNewPathEnc})>?\)`,
+      'gi'
+    );
+    const mdNewByName = new RegExp(
+      String.raw`!\[(.*?)\]\(<?[^)]*(?:${escapedNewName}|${escapedNewNameEnc})[^)]*>?\)`,
+      'gi'
+    );
+    const wikiNewByName = new RegExp(String.raw`!\[\[[^\]]*${escapedNewName}\]\]`, 'gi');
+
     for (const md of mdFiles) {
       const content = await this.app.vault.read(md);
       let changed = false;
 
+      const replaceWithAbsoluteMd = (match: string, alt: string) => {
+        const replacement = `![${alt}](${absMd})`;
+        if (match === replacement) {
+          return match;
+        }
+        changed = true;
+        return replacement;
+      };
+
+      const replaceWithAbsoluteWiki = (match: string) => {
+        const replacement = `![[${abs}]]`;
+        if (match === replacement) {
+          return match;
+        }
+        changed = true;
+        return replacement;
+      };
+
       let updated = content
-        .replace(mdFull,   (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
-        .replace(mdByName, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
+        .replace(mdFull, replaceWithAbsoluteMd)
+        .replace(mdByName, replaceWithAbsoluteMd)
         // Wiki links keep spaces unencoded
-        .replace(wikiFull,   () => { changed = true; return `![[${abs}]]`; })
-        .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
+        .replace(wikiFull, replaceWithAbsoluteWiki)
+        .replace(wikiByName, replaceWithAbsoluteWiki);
+
+      if (this.linksToPath(md.path, newPath)) {
+        updated = updated
+          .replace(mdNewFull, replaceWithAbsoluteMd)
+          .replace(mdNewByName, replaceWithAbsoluteMd)
+          .replace(wikiNewByName, replaceWithAbsoluteWiki);
+      }
 
       if (changed) {
         await this.app.vault.modify(md, updated);
         this.logDebug('updated file', { mdFile: md.path, to: abs });
       }
     }
+  }
+
+  private linksToPath(sourcePath: string, targetPath: string): boolean {
+    const resolved = this.app.metadataCache.resolvedLinks;
+    if (!resolved) {
+      return false;
+    }
+
+    const source = normalizePath(sourcePath);
+    const target = normalizePath(targetPath);
+    const targets = resolved[source];
+    if (!targets) {
+      return false;
+    }
+
+    return (targets[target] ?? 0) > 0;
   }
 
   /** Update links by file name only (used on create fallback) */
@@ -587,5 +798,52 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       attempt++;
     }
     return candidate;
+  }
+
+  async loadSettings(): Promise<void> {
+    const data = await this.loadData();
+    this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
+  }
+}
+
+class ImageLinkUpdaterSettingTab extends PluginSettingTab {
+  constructor(app: App, private readonly plugin: ImageLinkUpdaterPlugin) {
+    super(app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    containerEl.createEl('h2', { text: 'Image Link Updater' });
+
+    new Setting(containerEl)
+      .setName('Prefer assets or images subfolders for pasted images')
+      .setDesc('If enabled, pasted images are saved into existing assets or images subfolders beside the note.')
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.preferPasteSubfolders)
+          .onChange(async (value) => {
+            this.plugin.settings.preferPasteSubfolders = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Preferred subfolder name')
+      .setDesc('Optional. When set, pasted images first try this subfolder inside the note folder before assets or images.')
+      .addText((text) =>
+        text
+          .setPlaceholder('e.g. img')
+          .setValue(this.plugin.settings.preferredPasteSubfolder ?? '')
+          .onChange(async (value) => {
+            this.plugin.settings.preferredPasteSubfolder = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
   }
 }
