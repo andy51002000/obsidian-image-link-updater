@@ -33,13 +33,13 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   private cutFiles: TFile[] = []; // Store multiple files that were cut
   private readonly debugEnabled = false;
 
-  async onload() {
+  onload() {
     // --- Rename/Move handler ---
     this.registerEvent(
-      this.app.vault.on('rename', (file, oldPath) => {
+      this.app.vault.on('rename', async (file, oldPath) => {
         if (file instanceof TFile && this.isImage(file)) {
           this.logDebug('rename event', { oldPath, newPath: file.path });
-          this.updateImageLinks(oldPath, file.path);
+          await this.updateImageLinks(oldPath, file.path);
         }
       })
     );
@@ -349,7 +349,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     if (!normalized || normalized === '/') return;
     try {
       await this.app.vault.createFolder(normalized);
-    } catch (_e) {
+    } catch {
       /* already exists */
     }
   }
