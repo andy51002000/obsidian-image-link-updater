@@ -20,12 +20,12 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         this.cutFiles = []; // Store multiple files that were cut
         this.debugEnabled = false;
     }
-    async onload() {
+    onload() {
         // --- Rename/Move handler ---
-        this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+        this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
             if (file instanceof obsidian.TFile && this.isImage(file)) {
                 this.logDebug('rename event', { oldPath, newPath: file.path });
-                this.updateImageLinks(oldPath, file.path);
+                await this.updateImageLinks(oldPath, file.path);
             }
         }));
         // --- Create handler (covers OS-level moves that appear as delete+create) ---
@@ -286,7 +286,7 @@ class ImageLinkUpdaterPlugin extends obsidian.Plugin {
         try {
             await this.app.vault.createFolder(normalized);
         }
-        catch (_e) {
+        catch {
             /* already exists */
         }
     }
