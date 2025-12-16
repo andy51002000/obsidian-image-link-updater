@@ -1,7 +1,7 @@
 {
   "id": "image-link-updater",
   "name": "Image Link Updater",
-  "version": "1.3.7",
+  "version": "1.3.8",
   "minAppVersion": "1.0.0",
   "description": "Automatically updates markdown image links when image files are renamed or moved in the vault.",
   "author": "Andy Lai",

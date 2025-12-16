@@ -1,21 +1,12 @@
-import { Plugin, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
+import { Plugin, TFile, TFolder, normalizePath, Editor, Notice, FileManager } from 'obsidian';
 
-type FileManagerLike = {
+interface ObsFileManager extends FileManager {
   getAttachmentFolderPath?(file: TFile): string;
-  getNewFileParent?(path: string): TFolder | null;
-};
+}
 
-type ExplorerFileItem = {
-  file?: TFile;
-  selfEl?: Element & { hasClass?(className: string): boolean };
-};
 
-type ExplorerView = {
-  tree?: {
-    selectedDoms?: Array<Element & { dataset?: DOMStringMap }>;
-  };
-  fileItems?: Record<string, ExplorerFileItem>;
-};
+
+
 
 /**
  * Features:
@@ -67,15 +58,14 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         if (!activeFile) return;
 
         // Determine destination folder for attachments
+        // Determine destination folder for attachments
         let folderPath: string;
-        const fm = this.getFileManager();
-        if (fm?.getAttachmentFolderPath) {
+        const fm = this.app.fileManager as ObsFileManager;
+        if (fm.getAttachmentFolderPath) {
           folderPath = normalizePath(fm.getAttachmentFolderPath(activeFile));
-        } else if (fm?.getNewFileParent) {
+        } else {
           const parent = fm.getNewFileParent(activeFile.path);
           folderPath = normalizePath(parent?.path ?? '/');
-        } else {
-          folderPath = normalizePath('/');
         }
 
         // Ensure folder exists (no-op if it already does)
@@ -110,13 +100,13 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         // This event fires when right-clicking with multiple files selected
         // files is an array of selected files/folders
         const selectedFiles = files.filter((f): f is TFile => f instanceof TFile);
-        
+
         if (selectedFiles.length > 0) {
           menu.addItem((item) => {
-            const label = selectedFiles.length === 1 
-              ? 'Cut' 
+            const label = selectedFiles.length === 1
+              ? 'Cut'
               : `Cut (${selectedFiles.length} items)`;
-            
+
             item
               .setTitle(label)
               .setIcon('scissors')
@@ -153,7 +143,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
             const label = this.cutFiles.length === 1
               ? `Paste "${this.cutFiles[0].name}"`
               : `Paste ${this.cutFiles.length} files`;
-            
+
             item
               .setTitle(label)
               .setIcon('clipboard')
@@ -171,7 +161,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
             const label = this.cutFiles.length === 1
               ? `Paste to ${folderName}`
               : `Paste ${this.cutFiles.length} files to ${folderName}`;
-            
+
             item
               .setTitle(label)
               .setIcon('clipboard')
@@ -198,150 +188,9 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   /**
    * Get currently selected files from file explorer
    */
-  private getSelectedFiles(): TFile[] {
-    try {
-      const fileExplorerLeaf = this.app.workspace.getLeavesOfType('file-explorer')[0];
-      if (!fileExplorerLeaf) {
-        this.logDebug('File explorer not found');
-        return [];
-      }
 
-      const explorerView = this.getExplorerView(fileExplorerLeaf.view);
-      if (!explorerView) {
-        this.logDebug('File explorer view missing expected shape');
-        return [];
-      }
 
-      const treeSelection = this.collectSelectedFromTree(explorerView);
-      if (treeSelection.length > 0) {
-        this.logDebug('Found selected files (method 1):', treeSelection.length);
-        return treeSelection;
-      }
 
-      const classSelection = this.collectSelectedFromFileItems(explorerView.fileItems);
-      if (classSelection.length > 0) {
-        this.logDebug('Found selected files (method 2):', classSelection.length);
-        return classSelection;
-      }
-
-      this.logDebug('No selected files found');
-      return [];
-    } catch (error) {
-      console.error('[ImageLinkUpdater] Error getting selected files:', error);
-      return [];
-    }
-  }
-
-  private getExplorerView(view: unknown): ExplorerView | null {
-    if (!view || typeof view !== 'object') {
-      return null;
-    }
-
-    const maybeView = view as { tree?: unknown; fileItems?: unknown };
-    const tree = maybeView.tree;
-    if (tree !== undefined && (typeof tree !== 'object' || tree === null)) {
-      return null;
-    }
-
-    const fileItems = maybeView.fileItems;
-    if (fileItems !== undefined && (typeof fileItems !== 'object' || fileItems === null)) {
-      return null;
-    }
-
-    return maybeView as ExplorerView;
-  }
-
-  private collectSelectedFromTree(view: ExplorerView): TFile[] {
-    const selected: TFile[] = [];
-    const selectedDoms = view.tree?.selectedDoms;
-    if (!Array.isArray(selectedDoms) || !view.fileItems) {
-      return selected;
-    }
-
-    for (const dom of selectedDoms) {
-      const path = this.getDatasetPath(dom);
-      if (!path) {
-        continue;
-      }
-
-      const file = this.getFileFromItem(view.fileItems[path]);
-      if (file) {
-        selected.push(file);
-      }
-    }
-
-    return selected;
-  }
-
-  private collectSelectedFromFileItems(items?: Record<string, ExplorerFileItem>): TFile[] {
-    if (!items) {
-      return [];
-    }
-
-    const selected: TFile[] = [];
-    for (const [path, item] of Object.entries(items)) {
-      if (!this.hasSelectedClass(item.selfEl)) {
-        continue;
-      }
-
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (file instanceof TFile) {
-        selected.push(file);
-      }
-    }
-
-    return selected;
-  }
-
-  private getDatasetPath(dom: Element | undefined): string | null {
-    if (!dom) {
-      return null;
-    }
-
-    const dataset = (dom as Element & { dataset?: DOMStringMap }).dataset;
-    const path = dataset?.path;
-    return typeof path === 'string' ? path : null;
-  }
-
-  private hasSelectedClass(element: Element | undefined): boolean {
-    if (!element) {
-      return false;
-    }
-
-    const withHasClass = element as Element & { hasClass?(className: string): boolean };
-    if (typeof withHasClass.hasClass === 'function') {
-      return withHasClass.hasClass('is-selected');
-    }
-
-    return element.classList?.contains('is-selected') ?? false;
-  }
-
-  private getFileFromItem(item: ExplorerFileItem | undefined): TFile | null {
-    if (item?.file instanceof TFile) {
-      return item.file;
-    }
-    return null;
-  }
-
-  private getFileManager(): FileManagerLike | null {
-    const maybeApp = this.app as { fileManager?: unknown };
-    if (this.isFileManagerLike(maybeApp.fileManager)) {
-      return maybeApp.fileManager;
-    }
-    return null;
-  }
-
-  private isFileManagerLike(value: unknown): value is FileManagerLike {
-    if (!value || typeof value !== 'object') {
-      return false;
-    }
-
-    const manager = value as FileManagerLike;
-    return (
-      typeof manager.getAttachmentFolderPath === 'function' ||
-      typeof manager.getNewFileParent === 'function'
-    );
-  }
 
   /** Ensure a folder exists (skip if root or already exists) */
   private async ensureFolderExists(folderPath: string) {
@@ -512,7 +361,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       'gi'
     );
     // Wiki links use raw (unencoded) text inside [[...]]
-    const wikiFull   = new RegExp(String.raw`!\[\[(?:[^\]]*?)${escapedOldPath}\]\]`, 'gi');
+    const wikiFull = new RegExp(String.raw`!\[\[(?:[^\]]*?)${escapedOldPath}\]\]`, 'gi');
     const wikiByName = new RegExp(String.raw`!\[\[[^\]]*${escapedOldName}\]\]`, 'gi');
 
     for (const md of mdFiles) {
@@ -520,10 +369,10 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       let changed = false;
 
       let updated = content
-        .replace(mdFull,   (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
+        .replace(mdFull, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
         .replace(mdByName, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
         // Wiki links keep spaces unencoded
-        .replace(wikiFull,   () => { changed = true; return `![[${abs}]]`; })
+        .replace(wikiFull, () => { changed = true; return `![[${abs}]]`; })
         .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
 
       if (changed) {
@@ -573,7 +422,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   private timestamp(): string {
     const d = new Date();
     const p = (n: number) => n.toString().padStart(2, '0');
-    return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
   }
 
   private async uniquePath(dest: string, base: string, ext: string, folder: string): Promise<string> {
