@@ -4,6 +4,19 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.11] - 2026-07-18
+
+### Fixed
+
+- **Cut-and-paste could rarely overwrite a file with the same name** — When pasting multiple cut files and the destination already had a name conflict, the plugin probed for available names using a check-then-rename pattern. A concurrent operation (another paste, a file created by another app) could create that name in the gap between the check and the actual move, causing an unexpected collision. The rename now uses a retry-on-collision loop that is free from this race condition: if the destination already exists at the moment of rename, the plugin automatically tries the next numbered suffix without a separate existence check.
+
+### Internal
+
+- Removed the `uniquePath()` helper, which polled `adapter.exists()` in a loop — this is the method that had the race condition. Also removed `getFileNameAndExtension()`, which was only used by `uniquePath()`.
+- Hardened `scripts/prepare-release.mjs` with three pre-flight checks that run before packaging: (1) version consistency — fails if `manifest.json`, `package.json`, and `versions.json` do not all agree on the same version; (2) artifact freshness — fails if `main.js` is older than any TypeScript source file, preventing a stale build from shipping; (3) the script now produces a versioned release zip (`image-link-updater-{version}.zip`) alongside the release folder.
+
+---
+
 ## [1.3.10] - 2026-07-18
 
 ### Fixed
