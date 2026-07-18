@@ -3,7 +3,6 @@ import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension } fro
 
 interface ObsFileManager extends FileManager {
   getAttachmentFolderPath?(file: TFile): string;
-  getAvailablePathForAttachment?(filename: string, extension: string, file: TFile): Promise<string>;
 }
 
 
@@ -68,8 +67,6 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
         evt.preventDefault(); // stop default ![[...]] paste
 
-        const fm = this.app.fileManager as ObsFileManager;
-
         for (const item of imageItems) {
           const blob = item.getAsFile();
           if (!blob) continue;
@@ -78,24 +75,12 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           const base = `Pasted image ${this.timestamp()}`;
           const filename = `${base}.${ext}`;
 
-          // M1: prefer public getAvailablePathForAttachment (respects all attachment
-          // folder modes incl. relative "./attachments") over the private API.
-          let dest: string;
-          if (fm.getAvailablePathForAttachment) {
-            dest = normalizePath(await fm.getAvailablePathForAttachment(filename, ext, activeFile));
-          } else {
-            // Fallback: derive folder from the private API or the file's parent.
-            let folderPath: string;
-            if (fm.getAttachmentFolderPath) {
-              folderPath = normalizePath(fm.getAttachmentFolderPath(activeFile));
-            } else {
-              const parent = fm.getNewFileParent(activeFile.path);
-              folderPath = normalizePath(parent?.path ?? '/');
-            }
-            await this.ensureFolderExists(folderPath);
-            dest = normalizePath(`${folderPath}/${filename}`);
-            dest = await this.uniquePath(dest, base, ext, folderPath);
-          }
+          // M1: use the public getAvailablePathForAttachment API (respects all
+          // attachment folder modes incl. relative "./attachments").
+          // filename already includes the extension; sourcePath is the active note.
+          const dest = normalizePath(
+            await this.app.fileManager.getAvailablePathForAttachment(filename, activeFile.path)
+          );
 
           const arrayBuf = await blob.arrayBuffer();
           await this.app.vault.createBinary(dest, arrayBuf);
