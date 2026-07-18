@@ -233,20 +233,13 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     for (const file of this.cutFiles) {
       try {
         const oldPath = file.path;
-        let newPath = normalizePath(`${targetFolder.path}/${file.name}`);
+        const baseNewPath = normalizePath(`${targetFolder.path}/${file.name}`);
 
-        // Check if file with same name already exists in target folder
-        const existingFile = this.app.vault.getAbstractFileByPath(newPath);
-        if (existingFile) {
-          // Generate unique name
-          const { name, extension } = this.getFileNameAndExtension(file.name);
-          newPath = await this.uniquePath(newPath, name, extension, targetFolder.path);
-        }
-
-        // Move the file. fileManager.renameFile already fires the vault 'rename' event
-        // which triggers updateImageLinks via the registered handler — no explicit call needed (H1).
-        await this.app.fileManager.renameFile(file, newPath);
-        this.logDebug('Moved file:', oldPath, '->', newPath);
+        // Use retry-on-collision: attempt the rename; if the target already exists,
+        // increment a suffix counter and retry. This eliminates the TOCTOU window
+        // that existed when probing with adapter.exists() before renaming.
+        await this.renameWithRetry(file, baseNewPath);
+        this.logDebug('Moved file:', oldPath, '->', file.path);
 
         successCount++;
       } catch (error) {
@@ -280,20 +273,10 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     for (const file of this.cutFiles) {
       try {
         const oldPath = file.path;
-        let newPath = file.name;
 
-        // Check if file with same name already exists in root
-        const existingFile = this.app.vault.getAbstractFileByPath(newPath);
-        if (existingFile) {
-          // Generate unique name
-          const { name, extension } = this.getFileNameAndExtension(file.name);
-          newPath = await this.uniquePath(newPath, name, extension, '');
-        }
-
-        // Move the file. fileManager.renameFile already fires the vault 'rename' event
-        // which triggers updateImageLinks via the registered handler — no explicit call needed (H1).
-        await this.app.fileManager.renameFile(file, newPath);
-        this.logDebug('Moved file to root:', oldPath, '->', newPath);
+        // Use retry-on-collision (see renameWithRetry) to avoid the TOCTOU window.
+        await this.renameWithRetry(file, file.name);
+        this.logDebug('Moved file to root:', oldPath, '->', file.path);
 
         successCount++;
       } catch (error) {
@@ -313,20 +296,6 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     if (failedFiles.length > 0) {
       new Notice(`Failed to move ${failedFiles.length} file${failedFiles.length > 1 ? 's' : ''}`);
     }
-  }
-
-  /**
-   * Get file name and extension separately
-   */
-  private getFileNameAndExtension(fileName: string): { name: string; extension: string } {
-    const lastDotIndex = fileName.lastIndexOf('.');
-    if (lastDotIndex === -1) {
-      return { name: fileName, extension: '' };
-    }
-    return {
-      name: fileName.substring(0, lastDotIndex),
-      extension: fileName.substring(lastDotIndex + 1)
-    };
   }
 
   private isImage(file: TFile): boolean {
@@ -390,17 +359,39 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
   }
 
-  private async uniquePath(dest: string, base: string, ext: string, folder: string): Promise<string> {
-    let attempt = 1;
-    const exists = async (p: string) => !!(await this.app.vault.adapter.exists(p));
-    let candidate = dest;
-    while (await exists(candidate)) {
-      const suffix = ext ? `.${ext}` : '';
-      const folderPrefix = folder ? `${folder}/` : '';
-      candidate = normalizePath(`${folderPrefix}${base} ${attempt}${suffix}`);
-      attempt++;
+  /**
+   * Rename a file to targetPath, retrying with an incremented numeric suffix if the
+   * target already exists. This avoids the TOCTOU race of the old check-then-act
+   * pattern (adapter.exists → renameFile), where a concurrent operation could create
+   * the target between the check and the rename.
+   *
+   * The suffix is inserted before the file extension:
+   *   diagram.png → diagram 1.png → diagram 2.png …
+   */
+  private async renameWithRetry(file: TFile, targetPath: string): Promise<void> {
+    const dotIdx = targetPath.lastIndexOf('.');
+    const hasExt = dotIdx !== -1 && dotIdx > targetPath.lastIndexOf('/');
+    const stem = hasExt ? targetPath.slice(0, dotIdx) : targetPath;
+    const ext  = hasExt ? targetPath.slice(dotIdx)    : '';
+
+    let candidate = targetPath;
+    let attempt = 0;
+    while (true) {
+      try {
+        await this.app.fileManager.renameFile(file, candidate);
+        return;
+      } catch (err: unknown) {
+        // Detect "already exists" errors reported by different Obsidian/platform combos.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.toLowerCase().includes('exist') &&
+            !msg.toLowerCase().includes('eexist') &&
+            !msg.toLowerCase().includes('already')) {
+          throw err; // unrelated error — re-throw for the caller to handle
+        }
+        attempt++;
+        candidate = normalizePath(`${stem} ${attempt}${ext}`);
+      }
     }
-    return candidate;
   }
 }
 
