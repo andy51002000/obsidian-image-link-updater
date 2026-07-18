@@ -1,7 +1,9 @@
 import { Plugin, TFile, TFolder, normalizePath, Editor, Notice, FileManager } from 'obsidian';
+import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension } from './src/utils';
 
 interface ObsFileManager extends FileManager {
   getAttachmentFolderPath?(file: TFile): string;
+  getAvailablePathForAttachment?(filename: string, extension: string, file: TFile): Promise<string>;
 }
 
 
@@ -52,44 +54,54 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     // --- Clipboard image paste handler ---
     this.registerEvent(
       this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor: Editor) => {
+        // M2: check defaultPrevented before our own guard, and skip if another handler claimed it
+        if (evt.defaultPrevented) return;
+
         const items = evt?.clipboardData?.items ? Array.from(evt.clipboardData.items) : [];
         const imageItems = items.filter((i) => i.kind === 'file' && i.type?.startsWith('image/'));
         if (imageItems.length === 0) return; // let Obsidian handle non-image
 
-        evt.preventDefault(); // stop default ![[...]] paste
-
+        // M2: null-guard activeFile BEFORE calling preventDefault so non-image pastes
+        // are never swallowed silently when there is no active file.
         const activeFile = this.app.workspace.getActiveFile();
         if (!activeFile) return;
 
-        // Determine destination folder for attachments
-        // Determine destination folder for attachments
-        let folderPath: string;
-        const fm = this.app.fileManager as ObsFileManager;
-        if (fm.getAttachmentFolderPath) {
-          folderPath = normalizePath(fm.getAttachmentFolderPath(activeFile));
-        } else {
-          const parent = fm.getNewFileParent(activeFile.path);
-          folderPath = normalizePath(parent?.path ?? '/');
-        }
+        evt.preventDefault(); // stop default ![[...]] paste
 
-        // Ensure folder exists (no-op if it already does)
-        await this.ensureFolderExists(folderPath);
+        const fm = this.app.fileManager as ObsFileManager;
 
         for (const item of imageItems) {
           const blob = item.getAsFile();
           if (!blob) continue;
-          const ext = (blob.type.split('/')[1] || 'png').toLowerCase();
+          // M4: map MIME subtype to a valid extension (e.g. "svg+xml" → "svg")
+          const ext = mimeSubtypeToExtension(blob.type.split('/')[1] || 'png');
           const base = `Pasted image ${this.timestamp()}`;
+          const filename = `${base}.${ext}`;
 
-          // Compute a unique vault-root path
-          let dest = normalizePath(`${folderPath}/${base}.${ext}`);
-          dest = await this.uniquePath(dest, base, ext, folderPath);
+          // M1: prefer public getAvailablePathForAttachment (respects all attachment
+          // folder modes incl. relative "./attachments") over the private API.
+          let dest: string;
+          if (fm.getAvailablePathForAttachment) {
+            dest = normalizePath(await fm.getAvailablePathForAttachment(filename, ext, activeFile));
+          } else {
+            // Fallback: derive folder from the private API or the file's parent.
+            let folderPath: string;
+            if (fm.getAttachmentFolderPath) {
+              folderPath = normalizePath(fm.getAttachmentFolderPath(activeFile));
+            } else {
+              const parent = fm.getNewFileParent(activeFile.path);
+              folderPath = normalizePath(parent?.path ?? '/');
+            }
+            await this.ensureFolderExists(folderPath);
+            dest = normalizePath(`${folderPath}/${filename}`);
+            dest = await this.uniquePath(dest, base, ext, folderPath);
+          }
 
           const arrayBuf = await blob.arrayBuffer();
           await this.app.vault.createBinary(dest, arrayBuf);
 
-          // 確保路徑以 / 開頭
-          const mdPath = encodeURI(this.ensureLeadingSlash(dest));
+          // H3: use encodeMarkdownPath so parentheses in filenames are properly escaped
+          const mdPath = encodeMarkdownPath(this.ensureLeadingSlash(dest));
           editor.replaceSelection(`![](${mdPath})`);
           editor.setCursor(editor.getCursor());
 
@@ -229,14 +241,10 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           newPath = await this.uniquePath(newPath, name, extension, targetFolder.path);
         }
 
-        // Move the file
+        // Move the file. fileManager.renameFile already fires the vault 'rename' event
+        // which triggers updateImageLinks via the registered handler — no explicit call needed (H1).
         await this.app.fileManager.renameFile(file, newPath);
         this.logDebug('Moved file:', oldPath, '->', newPath);
-
-        // Update image links if it's an image file
-        if (this.isImage(file)) {
-          await this.updateImageLinks(oldPath, newPath);
-        }
 
         successCount++;
       } catch (error) {
@@ -279,14 +287,10 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           newPath = await this.uniquePath(newPath, name, extension, '');
         }
 
-        // Move the file
+        // Move the file. fileManager.renameFile already fires the vault 'rename' event
+        // which triggers updateImageLinks via the registered handler — no explicit call needed (H1).
         await this.app.fileManager.renameFile(file, newPath);
         this.logDebug('Moved file to root:', oldPath, '->', newPath);
-
-        // Update image links if it's an image file
-        if (this.isImage(file)) {
-          await this.updateImageLinks(oldPath, newPath);
-        }
 
         successCount++;
       } catch (error) {
@@ -336,52 +340,21 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   /** Update links using both full old path and file name */
   private async updateImageLinks(oldPath: string, newPath: string) {
     const mdFiles = this.app.vault.getMarkdownFiles();
-
     const oldFileName = oldPath.split('/').pop() ?? '';
-
-    // Build raw and encoded variants for both path and file name
-    const oldPathNorm = normalizePath(oldPath);
-    const oldPathEnc = encodeURI(oldPathNorm);
-    const oldNameEnc = encodeURI(oldFileName);
-
-    const escapedOldPath = this.escapeRegExp(oldPathNorm);
-    const escapedOldPathEnc = this.escapeRegExp(oldPathEnc);
-    const escapedOldName = this.escapeRegExp(oldFileName);
-    const escapedOldNameEnc = this.escapeRegExp(oldNameEnc);
-
-    // 確保新路徑以 / 開頭
-    const abs = this.ensureLeadingSlash(newPath);      // vault-root absolute path
-    const absMd = encodeURI(abs);                      // encoded for Markdown
-
-    // ---- Patterns (case-insensitive) ----
-    // Markdown: full old path (raw OR encoded), allowing optional leading '/'
-    const mdFull = new RegExp(
-      String.raw`!\[(.*?)\]\(<?(?:/${escapedOldPath}|/${escapedOldPathEnc}|${escapedOldPath}|${escapedOldPathEnc})>?\)`,
-      'gi'
-    );
-    // Markdown: match by file name (raw OR encoded)
-    const mdByName = new RegExp(
-      String.raw`!\[(.*?)\]\(<?[^)]*(?:${escapedOldName}|${escapedOldNameEnc})[^)]*>?\)`,
-      'gi'
-    );
-    // Wiki links use raw (unencoded) text inside [[...]]
-    const wikiFull = new RegExp(String.raw`!\[\[(?:[^\]]*?)${escapedOldPath}\]\]`, 'gi');
-    const wikiByName = new RegExp(String.raw`!\[\[[^\]]*${escapedOldName}\]\]`, 'gi');
+    const abs = this.ensureLeadingSlash(newPath);
 
     for (const md of mdFiles) {
-      const content = await this.app.vault.read(md);
-      let changed = false;
-
-      let updated = content
-        .replace(mdFull, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
-        .replace(mdByName, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
-        // Wiki links keep spaces unencoded
-        .replace(wikiFull, () => { changed = true; return `![[${abs}]]`; })
-        .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
-
-      if (changed) {
-        await this.app.vault.modify(md, updated);
-        this.logDebug('updated file', { mdFile: md.path, to: abs });
+      try {
+        await (this.app.vault as any).process(md, (content: string) => {
+          const updated = applyLinkReplacements(content, oldPath, oldFileName, abs);
+          if (updated !== content) {
+            this.logDebug('updated file', { mdFile: md.path, to: abs });
+          }
+          return updated;
+        });
+      } catch (err) {
+        console.error('[ImageLinkUpdater] Failed to update links in', md.path, err);
+        new Notice(`Image Link Updater: failed to update ${md.name} — see console for details`);
       }
     }
   }
@@ -389,38 +362,22 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   /** Update links by file name only (used on create fallback) */
   private async updateImageLinksByFilename(fileName: string, newPath: string) {
     const mdFiles = this.app.vault.getMarkdownFiles();
-
-    const nameEnc = encodeURI(fileName);
-    const nameEsc = this.escapeRegExp(fileName);
-    const nameEscEnc = this.escapeRegExp(nameEnc);
-
-    // 確保新路徑以 / 開頭
     const abs = this.ensureLeadingSlash(newPath);
-    const absMd = encodeURI(abs);
-
-    const mdByName = new RegExp(
-      String.raw`!\[(.*?)\]\(<?[^)]*(?:${nameEsc}|${nameEscEnc})[^)]*>?\)`,
-      'gi'
-    );
-    const wikiByName = new RegExp(String.raw`!\[\[[^\]]*${nameEsc}\]\]`, 'gi');
 
     for (const md of mdFiles) {
-      const content = await this.app.vault.read(md);
-      let changed = false;
-      let updated = content
-        .replace(mdByName, (_m, alt) => { changed = true; return `![${alt}](${absMd})`; })
-        .replace(wikiByName, () => { changed = true; return `![[${abs}]]`; });
-
-      if (changed) {
-        await this.app.vault.modify(md, updated);
-        this.logDebug('updated by filename', { mdFile: md.path, to: abs });
+      try {
+        await (this.app.vault as any).process(md, (content: string) => {
+          const updated = applyLinkReplacements(content, fileName, fileName, abs);
+          if (updated !== content) {
+            this.logDebug('updated by filename', { mdFile: md.path, to: abs });
+          }
+          return updated;
+        });
+      } catch (err) {
+        console.error('[ImageLinkUpdater] Failed to update links in', md.path, err);
+        new Notice(`Image Link Updater: failed to update ${md.name} — see console for details`);
       }
     }
-  }
-
-  private escapeRegExp(str: string): string {
-    // Escape regex metacharacters: . * + ? ^ $ { } ( ) | [ ] \
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   private timestamp(): string {
