@@ -4,6 +4,17 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.12] - 2026-07-18
+
+### Changed
+
+- Metadata-only release preparing for Obsidian Community Plugins directory submission — no functional changes:
+  - `manifest.json` description: corrected "markdown" to "Markdown" per the community submission style guide.
+  - Added `fundingUrl` (Buy Me a Coffee) to `manifest.json`, matching the existing README link.
+  - Raised `minAppVersion` from `1.0.0` to `1.5.7`: the plugin calls `FileManager.getAvailablePathForAttachment()`, which first appears in the public API type definitions in the `obsidian` npm package at version 1.5.7 (absent in 1.4.11 and earlier).
+
+---
+
 ## [1.3.11] - 2026-07-18
 
 ### Fixed
