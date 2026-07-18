@@ -9,3 +9,17 @@ main.js
 .obsidian-cache/
 # wdio logs
 wdio-*.log
+# vault-fixture is a reference snapshot of the user's vault (not used by tests;
+# tests use vault-minimal which is fully committed)
+e2e/vault-fixture/100-challenge-find-happiness/
+e2e/vault-fixture/Untitled.md
+e2e/vault-fixture/a.png
+e2e/vault-fixture/automation/
+e2e/vault-fixture/backflip - 1124.md
+e2e/vault-fixture/backflip.md
+e2e/vault-fixture/copilot/
+e2e/vault-fixture/data.png
+e2e/vault-fixture/english-class/
+e2e/vault-fixture/fence-img.png
+e2e/vault-fixture/img.png
+e2e/vault-fixture/todo/
