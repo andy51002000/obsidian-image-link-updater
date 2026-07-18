@@ -1,9 +1,17 @@
-import { Plugin, TFile, TFolder, normalizePath, Editor, Notice, FileManager } from 'obsidian';
+import { Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath, Editor, Notice, FileManager } from 'obsidian';
 import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension } from './src/utils';
 
 interface ObsFileManager extends FileManager {
   getAttachmentFolderPath?(file: TFile): string;
 }
+
+interface ImageLinkUpdaterSettings {
+  debugEnabled: boolean;
+}
+
+const DEFAULT_SETTINGS: ImageLinkUpdaterSettings = {
+  debugEnabled: false,
+};
 
 
 
@@ -22,10 +30,12 @@ interface ObsFileManager extends FileManager {
  * so dragging a file whose link was previously `![](Pasted%20image ....png)` will be updated.
  */
 export default class ImageLinkUpdaterPlugin extends Plugin {
-  private cutFiles: TFile[] = []; // Store multiple files that were cut
-  private readonly debugEnabled = false;
+  private cutFiles: TFile[] = [];
+  settings: ImageLinkUpdaterSettings = { ...DEFAULT_SETTINGS };
 
-  onload() {
+  async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new ImageLinkUpdaterSettingTab(this.app, this));
     // --- Rename/Move handler ---
     this.registerEvent(
       this.app.vault.on('rename', async (file, oldPath) => {
@@ -178,8 +188,16 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     );
   }
 
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+
   private logDebug(...data: unknown[]) {
-    if (!this.debugEnabled) {
+    if (!this.settings.debugEnabled) {
       return;
     }
     console.debug('[ImageLinkUpdater]', ...data);
@@ -383,5 +401,31 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       attempt++;
     }
     return candidate;
+  }
+}
+
+class ImageLinkUpdaterSettingTab extends PluginSettingTab {
+  private readonly plugin: ImageLinkUpdaterPlugin;
+
+  constructor(app: import('obsidian').App, plugin: ImageLinkUpdaterPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName('Debug logging')
+      .setDesc('Log detailed plugin activity to the browser console (open DevTools → Console).')
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.debugEnabled)
+          .onChange(async (value) => {
+            this.plugin.settings.debugEnabled = value;
+            await this.plugin.saveSettings();
+          })
+      );
   }
 }
