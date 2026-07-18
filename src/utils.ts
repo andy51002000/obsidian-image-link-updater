@@ -143,58 +143,25 @@ export function applyLinkReplacements(
     });
   }
 
-  // Track which character ranges have been replaced to prevent double-rewriting.
-  // We rebuild the string manually for the two-pass md approach.
-  const replacedRanges: Array<[number, number]> = [];
-
-  function isAlreadyReplaced(offset: number, length: number): boolean {
-    return replacedRanges.some(([start, end]) => offset < end && offset + length > start);
-  }
-
   let updated = content;
 
-  // Pass 1: mdFull — exact path match
-  updated = content.replace(mdFull, (...args: unknown[]) => {
-    const offset = args[args.length - 2] as number;
-    const match = args[0] as string;
-    if (isInCodeRegion(content, offset)) return match;
-    const alt = (args[1] as string | undefined) ?? '';
-    const title = args[2] as string | undefined;
-    const titleSuffix = title !== undefined ? ` "${title}"` : '';
-    const replacement = `![${alt}](${absMd}${titleSuffix})`;
-    replacedRanges.push([offset, offset + match.length]);
-    return replacement;
-  });
-
-  // Pass 2: mdByName — fallback filename match, skip already-replaced ranges
-  // We need to operate on the original content to get correct offsets.
-  const afterByName = content.replace(mdByName, (...args: unknown[]) => {
-    const offset = args[args.length - 2] as number;
-    const match = args[0] as string;
-    if (isInCodeRegion(content, offset)) return match;
-    if (isAlreadyReplaced(offset, match.length)) return match;
+  // Pass 1: mdFull — exact full-path match (raw or encoded).
+  updated = safeReplace(updated, mdFull, (...args) => {
     const alt = (args[1] as string | undefined) ?? '';
     const title = args[2] as string | undefined;
     const titleSuffix = title !== undefined ? ` "${title}"` : '';
     return `![${alt}](${absMd}${titleSuffix})`;
   });
 
-  // Merge: use mdFull results for replaced ranges, mdByName for everything else.
-  // Simpler approach: re-apply mdByName on top of the mdFull result, but guard with
-  // the new absolute path so it won't match the already-replaced links.
-  // Since mdByName matches `photo.png` and the new path also contains `photo.png`,
-  // we must prevent re-matching. We do this by checking if the match was in a range
-  // that was already replaced in pass 1 — but now `updated` has different offsets.
-  //
-  // The cleanest solution: apply mdByName to `updated` (post-mdFull) but exclude
-  // any match whose full-URL part is the new absolute path (already correct).
+  // Pass 2: mdByName — fallback filename-only match, applied to the already-updated
+  // string. Guard: skip any match that already points to the new absolute path
+  // (meaning pass 1 already rewrote it and the filename still appears in the new path).
   updated = updated.replace(mdByName, (...args: unknown[]) => {
     const offset = args[args.length - 2] as number;
     const match = args[0] as string;
     if (isInCodeRegion(updated, offset)) return match;
-    // If the match already contains the new absolute path, skip it.
-    const newPathEsc = encodeMarkdownPath(newAbsPath);
-    if (match.includes(newPathEsc) || match.includes(newAbsPath)) return match;
+    const newPathEnc = encodeMarkdownPath(newAbsPath);
+    if (match.includes(newPathEnc) || match.includes(newAbsPath)) return match;
     const alt = (args[1] as string | undefined) ?? '';
     const title = args[2] as string | undefined;
     const titleSuffix = title !== undefined ? ` "${title}"` : '';

@@ -1,9 +1,5 @@
-import { Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath, Editor, Notice, FileManager } from 'obsidian';
+import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
 import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension } from './src/utils';
-
-interface ObsFileManager extends FileManager {
-  getAttachmentFolderPath?(file: TFile): string;
-}
 
 interface ImageLinkUpdaterSettings {
   debugEnabled: boolean;
@@ -189,7 +185,8 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = (await this.loadData()) as Partial<ImageLinkUpdaterSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
   }
 
   async saveSettings() {
@@ -318,7 +315,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
     for (const md of mdFiles) {
       try {
-        await (this.app.vault as any).process(md, (content: string) => {
+        await this.app.vault.process(md, (content: string) => {
           const updated = applyLinkReplacements(content, oldPath, oldFileName, abs);
           if (updated !== content) {
             this.logDebug('updated file', { mdFile: md.path, to: abs });
@@ -339,7 +336,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
     for (const md of mdFiles) {
       try {
-        await (this.app.vault as any).process(md, (content: string) => {
+        await this.app.vault.process(md, (content: string) => {
           const updated = applyLinkReplacements(content, fileName, fileName, abs);
           if (updated !== content) {
             this.logDebug('updated by filename', { mdFile: md.path, to: abs });
@@ -403,13 +400,31 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  // Declarative settings definition for Obsidian 1.13+ settings search.
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        name: 'Debug logging',
+        desc: 'Log detailed plugin activity to the browser console (open devtools → console).',
+        control: {
+          type: 'toggle',
+          key: 'debugEnabled',
+          defaultValue: false,
+        },
+      },
+    ];
+  }
+
+  // getControlValue / setControlValue are inherited from PluginSettingTab and
+  // read/write this.plugin.settings automatically via the key field above.
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
     new Setting(containerEl)
       .setName('Debug logging')
-      .setDesc('Log detailed plugin activity to the browser console (open DevTools → Console).')
+      .setDesc('Log detailed plugin activity to the browser console (open devtools → console).')
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.debugEnabled)

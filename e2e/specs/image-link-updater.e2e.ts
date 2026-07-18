@@ -18,6 +18,7 @@
  */
 
 import { browser } from "@wdio/globals";
+import { FileSystemAdapter, TFile } from "obsidian";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -32,7 +33,7 @@ const FIXTURE_VAULT = path.resolve(__dirname, "../vault-minimal");
 /** Get the sandbox vault's absolute path on disk. */
 async function getCurrentVaultPath(): Promise<string> {
   return browser.executeObsidian(
-    ({ app }) => (app.vault.adapter as any).basePath as string
+    ({ app }) => (app.vault.adapter as FileSystemAdapter).getBasePath()
   );
 }
 
@@ -54,7 +55,7 @@ async function fireRename(oldPath: string, newPath: string): Promise<void> {
       if (!file) throw new Error(`File not found in vault: ${o}`);
       // Fire-and-forget — the rename + plugin link update runs asynchronously.
       // The script returns immediately before the renderer blocks.
-      app.fileManager.renameFile(file as any, n).catch(console.error);
+      app.fileManager.renameFile(file as TFile, n).catch(console.error);
     },
     oldPath,
     newPath
