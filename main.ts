@@ -36,14 +36,18 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     );
 
     // --- Create handler (covers OS-level moves that appear as delete+create) ---
-    this.registerEvent(
-      this.app.vault.on('create', async (file) => {
-        if (file instanceof TFile && this.isImage(file)) {
-          this.logDebug('create event', { path: file.path });
-          await this.updateImageLinksByFilename(file.name, file.path);
-        }
-      })
-    );
+    // Guard with onLayoutReady so that files already present at vault load do not
+    // trigger a mass rewrite on every startup (fixes O(images × notes) startup reads).
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent(
+        this.app.vault.on('create', async (file) => {
+          if (file instanceof TFile && this.isImage(file)) {
+            this.logDebug('create event', { path: file.path });
+            await this.updateImageLinksByFilename(file.name, file.path);
+          }
+        })
+      );
+    });
 
     // --- Clipboard image paste handler ---
     this.registerEvent(
