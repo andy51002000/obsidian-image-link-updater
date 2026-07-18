@@ -5,15 +5,19 @@
   "license": "AGPL-3.0-or-later",
   "main": "main.js",
   "scripts": {
-    "build": "rollup -c;cp dist/main.js main.js",
+    "build": "node scripts/build.mjs && cp dist/main.js main.js",
+    "test": "vitest run",
     "release": "npm run build && node scripts/prepare-release.mjs"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@types/node": "^24.0.13",
+    "@vitest/coverage-v8": "^2.1.9",
+    "esbuild": "^0.28.1",
     "obsidian": "latest",
     "rollup": "^4.45.0",
     "rollup-plugin-typescript2": "^0.36.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^2.1.9"
   }
 }
