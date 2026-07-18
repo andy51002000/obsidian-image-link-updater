@@ -4,6 +4,24 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.13] - 2026-07-18
+
+### Fixed
+
+- **License file corrected** — The LICENSE file now contains the exact canonical GNU AGPL-3.0 text as published by the Free Software Foundation, ensuring it is recognized correctly by automated license scanners (licensee/GitHub's detection). The previous file had minor formatting deviations that caused recognition failures in the Obsidian community directory pre-scan.
+
+### Internal
+
+- Removed internal `as any` type casts from `vault.process()` calls — the Obsidian API has been properly typed since minAppVersion 1.5.7, so the cast is no longer needed.
+- Removed the unused `ObsFileManager` local interface (its only remaining member, the private `getAttachmentFolderPath` fallback, was superseded by the public `getAvailablePathForAttachment` API in 1.3.9).
+- Added `getSettingDefinitions()` to the settings tab — this declarative API (introduced in Obsidian 1.13) enables settings search indexing and consistent rendering across platforms.
+- Eliminated a dead code path in `src/utils.ts` (`afterByName` variable was computed but never used); simplified the two-pass markdown link replacement to remove redundant state.
+- Fixed `@wdio/globals` missing from `devDependencies` in `package.json` — it was referenced in `tsconfig.json` `types` but not declared, causing scanner warnings about undeclared type dependencies.
+- Fixed e2e test file type casts: replaced `as any` with typed `FileSystemAdapter` (using `getBasePath()` instead of the non-existent `.basePath` property) and `TFile` for the rename call.
+- Added `eslint-plugin-obsidianmd` (recommended config) to enforce Obsidian-specific lint rules on `main.ts` and `src/`; 0 errors on current code.
+
+---
+
 ## [1.3.12] - 2026-07-18
 
 ### Changed
