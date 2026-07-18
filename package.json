@@ -7,17 +7,25 @@
   "scripts": {
     "build": "node scripts/build.mjs && cp dist/main.js main.js",
     "test": "vitest run",
+    "test:e2e": "wdio run ./e2e/wdio.conf.mts",
     "release": "npm run build && node scripts/prepare-release.mjs"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.1",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^24.0.13",
     "@vitest/coverage-v8": "^2.1.9",
+    "@wdio/cli": "^9.29.1",
+    "@wdio/local-runner": "^9.29.1",
+    "@wdio/mocha-framework": "^9.29.1",
+    "@wdio/spec-reporter": "^9.29.1",
     "esbuild": "^0.28.1",
     "obsidian": "latest",
     "rollup": "^4.45.0",
     "rollup-plugin-typescript2": "^0.36.0",
     "typescript": "^5.0.0",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "wdio-obsidian-reporter": "^3.1.1",
+    "wdio-obsidian-service": "^3.1.1"
   }
 }

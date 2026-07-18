@@ -5,3 +5,7 @@ dist/
 doc/
 release/
 main.js
+# wdio-obsidian-service cache (downloaded Obsidian versions + ChromeDriver)
+.obsidian-cache/
+# wdio logs
+wdio-*.log
