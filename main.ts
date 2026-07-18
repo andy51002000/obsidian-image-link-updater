@@ -88,7 +88,6 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           // H3: use encodeMarkdownPath so parentheses in filenames are properly escaped
           const mdPath = encodeMarkdownPath(this.ensureLeadingSlash(dest));
           editor.replaceSelection(`![](${mdPath})`);
-          editor.setCursor(editor.getCursor());
 
           this.logDebug('pasted image ->', dest);
         }
@@ -211,7 +210,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     if (this.cutFiles.length === 0) return;
 
     let successCount = 0;
-    let failCount = 0;
+    const failedFiles: TFile[] = [];
 
     for (const file of this.cutFiles) {
       try {
@@ -234,20 +233,21 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         successCount++;
       } catch (error) {
         console.error('[ImageLinkUpdater] Error moving file:', file.path, error);
-        failCount++;
+        failedFiles.push(file);
       }
     }
+
+    // Only remove successfully moved files from the cut list so the user can retry
+    // the failed ones without needing to cut them again.
+    this.cutFiles = failedFiles;
 
     // Show result notification
     if (successCount > 0) {
       new Notice(`Moved ${successCount} file${successCount > 1 ? 's' : ''} to ${targetFolder.name}`);
     }
-    if (failCount > 0) {
-      new Notice(`Failed to move ${failCount} file${failCount > 1 ? 's' : ''}`);
+    if (failedFiles.length > 0) {
+      new Notice(`Failed to move ${failedFiles.length} file${failedFiles.length > 1 ? 's' : ''}`);
     }
-
-    // Clear the cut files
-    this.cutFiles = [];
   }
 
   /**
@@ -257,7 +257,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     if (this.cutFiles.length === 0) return;
 
     let successCount = 0;
-    let failCount = 0;
+    const failedFiles: TFile[] = [];
 
     for (const file of this.cutFiles) {
       try {
@@ -280,20 +280,21 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         successCount++;
       } catch (error) {
         console.error('[ImageLinkUpdater] Error moving file to root:', file.path, error);
-        failCount++;
+        failedFiles.push(file);
       }
     }
+
+    // Only remove successfully moved files from the cut list so the user can retry
+    // the failed ones without needing to cut them again.
+    this.cutFiles = failedFiles;
 
     // Show result notification
     if (successCount > 0) {
       new Notice(`Moved ${successCount} file${successCount > 1 ? 's' : ''} to root`);
     }
-    if (failCount > 0) {
-      new Notice(`Failed to move ${failCount} file${failCount > 1 ? 's' : ''}`);
+    if (failedFiles.length > 0) {
+      new Notice(`Failed to move ${failedFiles.length} file${failedFiles.length > 1 ? 's' : ''}`);
     }
-
-    // Clear the cut files
-    this.cutFiles = [];
   }
 
   /**
