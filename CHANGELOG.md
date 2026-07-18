@@ -4,6 +4,18 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.10] - 2026-07-18
+
+### Fixed
+
+- **Cut selection lost after a partially failed paste** — When moving a batch of files via Cut/Paste and some moves failed, the entire cut list was cleared regardless of outcome, forcing the user to re-cut the failed files before retrying. Failed files now remain in the clipboard so the paste can be retried immediately after resolving the issue (e.g. a permissions error on the target folder).
+
+### Added
+
+- **Debug logging toggle** — A new **Settings → Image Link Updater → Debug logging** toggle lets you enable detailed console output without editing source code. The preference is persisted across vault restarts. Open DevTools → Console to view the debug messages.
+
+---
+
 ## [1.3.9] - 2026-07-18
 
 ### Fixed
