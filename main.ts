@@ -98,13 +98,15 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           }
 
           const arrayBuf = await blob.arrayBuffer();
-          await this.app.vault.createBinary(dest, arrayBuf);
+          // Use retry-on-collision so concurrent pastes never race on the same path.
+          // createBinaryWithRetry is the atomic equivalent of renameWithRetry for creates.
+          const written = await this.createBinaryWithRetry(dest, arrayBuf);
 
           // H3: use encodeMarkdownPath so parentheses in filenames are properly escaped
-          const mdPath = encodeMarkdownPath(this.ensureLeadingSlash(dest));
+          const mdPath = encodeMarkdownPath(this.ensureLeadingSlash(written));
           editor.replaceSelection(`![](${mdPath})`);
 
-          this.logDebug('pasted image ->', dest);
+          this.logDebug('pasted image ->', written);
         }
       })
     );
@@ -203,13 +205,12 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   }
 
   /**
-   * Resolve the paste destination using the Smart attachment folder logic.
-   * Collects sibling folder names from the vault and delegates to the pure
-   * resolveSmartAttachmentFolder function, then gets a unique path within that folder.
+   * Resolve the base paste destination folder using the Smart attachment folder logic.
+   * Returns the candidate path (folder/filename) without any existence probing —
+   * collision handling is deferred to createBinaryWithRetry at the actual write site.
    */
   private async resolveSmartDest(filename: string, activeFile: TFile): Promise<string> {
     const noteParent = activeFile.parent;
-    // Collect names of all direct-child folders of the note's parent folder
     const siblingFolderNames: string[] = (noteParent?.children ?? [])
       .filter((f): f is TFolder => f instanceof TFolder)
       .map((f) => f.name);
@@ -221,7 +222,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       priorityList
     );
 
-    // Ensure the resolved folder exists before writing into it
+    // Ensure the resolved folder exists (createFolder is idempotent — safe to call always)
     if (folderPath) {
       try {
         await this.app.vault.createFolder(folderPath);
@@ -230,22 +231,40 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       }
     }
 
-    const candidatePath = folderPath ? normalizePath(`${folderPath}/${filename}`) : filename;
-    // Use the vault adapter to find a unique path (avoid overwriting existing files)
-    let dest = candidatePath;
-    const dotIdx = filename.lastIndexOf('.');
-    const stem = dotIdx !== -1 ? filename.slice(0, dotIdx) : filename;
-    const ext  = dotIdx !== -1 ? filename.slice(dotIdx)    : '';
-    let attempt = 0;
-    while (await this.app.vault.adapter.exists(dest)) {
-      attempt++;
-      const unique = folderPath
-        ? normalizePath(`${folderPath}/${stem} ${attempt}${ext}`)
-        : `${stem} ${attempt}${ext}`;
-      dest = unique;
-    }
+    return folderPath ? normalizePath(`${folderPath}/${filename}`) : filename;
+  }
 
-    return dest;
+  /**
+   * Write binary data to targetPath, retrying with an incremented numeric suffix on
+   * "already exists" errors. This is the atomic alternative to the TOCTOU-prone
+   * exists()-probe pattern: the create and the collision detection happen in one
+   * OS-level operation, just like renameWithRetry does for moves.
+   *
+   * Returns the path actually written to.
+   */
+  private async createBinaryWithRetry(targetPath: string, data: ArrayBuffer): Promise<string> {
+    const dotIdx = targetPath.lastIndexOf('.');
+    const hasExt = dotIdx !== -1 && dotIdx > targetPath.lastIndexOf('/');
+    const stem = hasExt ? targetPath.slice(0, dotIdx) : targetPath;
+    const ext  = hasExt ? targetPath.slice(dotIdx)    : '';
+
+    let candidate = targetPath;
+    let attempt = 0;
+    while (true) {
+      try {
+        await this.app.vault.createBinary(candidate, data);
+        return candidate;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.toLowerCase().includes('exist') &&
+            !msg.toLowerCase().includes('eexist') &&
+            !msg.toLowerCase().includes('already')) {
+          throw err;
+        }
+        attempt++;
+        candidate = normalizePath(`${stem} ${attempt}${ext}`);
+      }
+    }
   }
 
   private logDebug(...data: unknown[]) {
