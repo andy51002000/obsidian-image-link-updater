@@ -4,6 +4,18 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.14] - 2026-07-19
+
+### Added
+
+- **Smart attachment folder** — New optional setting (disabled by default) that changes where clipboard-pasted images are saved. When enabled, the plugin checks the note's sibling folders in a configurable priority order and saves the image into the first matching folder that already exists. If no match is found, the image is saved into the note's own folder. This is useful for vaults that keep images in a dedicated `assets/` or `images/` subfolder alongside each group of notes.
+
+- **Smart folder names** — Companion text setting (comma-separated, e.g. `assets, images`) that defines the priority order of sibling folder names to probe. Matching is case-sensitive. The field is disabled in the UI when Smart attachment folder is off. Default: `assets, images`.
+
+Both settings are off by default — users who do not opt in will see no change in behavior.
+
+---
+
 ## [1.3.13] - 2026-07-18
 
 ### Fixed
