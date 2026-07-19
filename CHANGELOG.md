@@ -4,6 +4,14 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.15] - 2026-07-19
+
+### Fixed
+
+- **Race condition in Smart attachment folder unique-naming** — When the Smart attachment folder feature resolved a destination that already existed, it used an `adapter.exists()` probe loop before calling `createBinary`. This check-then-create pattern has a TOCTOU race window where a concurrent paste could create the same file between the check and the write. Fixed by removing the probe loop entirely and instead wrapping `createBinary` in a retry-on-collision loop (`createBinaryWithRetry`): if the create fails with an "already exists" error, the suffix counter is incremented and the write is retried atomically — the same approach used by `renameWithRetry` for file moves since 1.3.11.
+
+---
+
 ## [1.3.14] - 2026-07-19
 
 ### Added
