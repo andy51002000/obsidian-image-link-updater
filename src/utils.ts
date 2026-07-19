@@ -3,6 +3,61 @@
  * None of these functions depend on the Obsidian runtime.
  */
 
+/**
+ * Parse a comma-separated folder priority list into a clean ordered array.
+ * Trims whitespace from each entry; ignores empty entries.
+ */
+export function parseSmartFolderNames(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Resolve the destination folder for a pasted image when Smart attachment folder is ON.
+ *
+ * Algorithm:
+ *   1. Walk the priority list in order.
+ *   2. Return the first entry whose name EXACTLY matches a folder that is a direct
+ *      child of the note's parent folder (i.e. a sibling of the note).
+ *   3. If none match, return the note's parent folder path directly.
+ *
+ * Case-sensitivity: matches are case-sensitive because Obsidian vault paths are
+ * case-sensitive on macOS (default HFS+ case-insensitive, but APFS and most other
+ * platforms are case-sensitive), and Obsidian's own path APIs treat paths as
+ * case-sensitive. Using case-sensitive matching is the safe, predictable default —
+ * a user who names their folder "Assets" and lists "assets" in the priority list will
+ * see the fallback behaviour and can correct their list.
+ *
+ * @param notePath       - Vault-root path of the active note, e.g. "Docs/notes/my-note.md"
+ * @param siblingFolders - Names of all direct-child folders of the note's parent,
+ *                         e.g. ["assets", "images", "drafts"]
+ * @param priorityList   - Ordered list of candidate folder names to probe, e.g. ["assets", "images"]
+ * @returns              - Vault-root folder path to save into (no trailing slash),
+ *                         e.g. "Docs/notes/assets" or "Docs/notes" (fallback)
+ */
+export function resolveSmartAttachmentFolder(
+  notePath: string,
+  siblingFolders: string[],
+  priorityList: string[]
+): string {
+  // Derive the parent folder of the note (empty string means vault root)
+  const lastSlash = notePath.lastIndexOf('/');
+  const noteParent = lastSlash === -1 ? '' : notePath.slice(0, lastSlash);
+
+  const siblingSet = new Set(siblingFolders);
+
+  for (const candidate of priorityList) {
+    if (siblingSet.has(candidate)) {
+      return noteParent ? `${noteParent}/${candidate}` : candidate;
+    }
+  }
+
+  // Fallback: note's parent folder
+  return noteParent;
+}
+
 /** Escape regex metacharacters in a string. */
 export function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

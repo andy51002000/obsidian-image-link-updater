@@ -5,6 +5,8 @@ import {
   encodeMarkdownPath,
   ensureLeadingSlash,
   applyLinkReplacements,
+  parseSmartFolderNames,
+  resolveSmartAttachmentFolder,
 } from '../src/utils';
 
 // ---------------------------------------------------------------------------
@@ -174,5 +176,127 @@ describe('applyLinkReplacements — C3: skip code fences', () => {
     ].join('\n');
     const result = applyLinkReplacements(content, 'attachments/a.png', 'a.png', '/new/a.png');
     expect(result).toContain('/new/a.png');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseSmartFolderNames
+// ---------------------------------------------------------------------------
+describe('parseSmartFolderNames', () => {
+  it('splits comma-separated entries', () => {
+    expect(parseSmartFolderNames('assets, images')).toEqual(['assets', 'images']);
+  });
+  it('trims whitespace from each entry', () => {
+    expect(parseSmartFolderNames('  assets , images  ')).toEqual(['assets', 'images']);
+  });
+  it('ignores empty entries from double commas', () => {
+    expect(parseSmartFolderNames('assets,,images')).toEqual(['assets', 'images']);
+  });
+  it('ignores trailing comma', () => {
+    expect(parseSmartFolderNames('assets, images,')).toEqual(['assets', 'images']);
+  });
+  it('returns empty array for blank string', () => {
+    expect(parseSmartFolderNames('')).toEqual([]);
+  });
+  it('returns empty array for only commas and spaces', () => {
+    expect(parseSmartFolderNames(' , , ')).toEqual([]);
+  });
+  it('handles single entry without comma', () => {
+    expect(parseSmartFolderNames('pics')).toEqual(['pics']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveSmartAttachmentFolder
+// ---------------------------------------------------------------------------
+describe('resolveSmartAttachmentFolder', () => {
+  // Helper: note at Docs/notes/my-note.md with sibling folders
+  const notePath = 'Docs/notes/my-note.md';
+  const noteParent = 'Docs/notes';
+
+  it('returns first priority match when it exists as a sibling', () => {
+    const result = resolveSmartAttachmentFolder(
+      notePath,
+      ['assets', 'images', 'drafts'],
+      ['assets', 'images']
+    );
+    expect(result).toBe(`${noteParent}/assets`);
+  });
+
+  it('first-match wins: picks "assets" over "images" per priority order', () => {
+    const result = resolveSmartAttachmentFolder(
+      notePath,
+      ['assets', 'images'],
+      ['assets', 'images']
+    );
+    expect(result).toBe(`${noteParent}/assets`);
+  });
+
+  it('skips first priority and picks second when only second exists', () => {
+    const result = resolveSmartAttachmentFolder(
+      notePath,
+      ['images'],
+      ['assets', 'images']
+    );
+    expect(result).toBe(`${noteParent}/images`);
+  });
+
+  it('falls back to note parent folder when no priority match exists', () => {
+    const result = resolveSmartAttachmentFolder(
+      notePath,
+      ['drafts', 'old'],
+      ['assets', 'images']
+    );
+    expect(result).toBe(noteParent);
+  });
+
+  it('handles empty sibling list (fallback to note parent)', () => {
+    const result = resolveSmartAttachmentFolder(notePath, [], ['assets', 'images']);
+    expect(result).toBe(noteParent);
+  });
+
+  it('handles empty priority list (always fallback)', () => {
+    const result = resolveSmartAttachmentFolder(notePath, ['assets', 'images'], []);
+    expect(result).toBe(noteParent);
+  });
+
+  it('respects custom priority list "pics, media"', () => {
+    const result = resolveSmartAttachmentFolder(
+      notePath,
+      ['media', 'pics'],
+      ['pics', 'media']
+    );
+    expect(result).toBe(`${noteParent}/pics`);
+  });
+
+  it('is case-sensitive: "Assets" does not match priority "assets"', () => {
+    const result = resolveSmartAttachmentFolder(
+      notePath,
+      ['Assets'],
+      ['assets', 'images']
+    );
+    // "Assets" != "assets" — fallback to parent
+    expect(result).toBe(noteParent);
+  });
+
+  it('handles note at vault root (no parent folder)', () => {
+    // Note at vault root: "root-note.md" has no parent directory segment
+    const result = resolveSmartAttachmentFolder(
+      'root-note.md',
+      ['assets'],
+      ['assets', 'images']
+    );
+    // parent is '', sibling path is just 'assets'
+    expect(result).toBe('assets');
+  });
+
+  it('handles note at vault root with no matching sibling (fallback to empty string)', () => {
+    const result = resolveSmartAttachmentFolder(
+      'root-note.md',
+      ['drafts'],
+      ['assets', 'images']
+    );
+    // parent is '' — fallback is vault root
+    expect(result).toBe('');
   });
 });

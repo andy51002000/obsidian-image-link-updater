@@ -1,12 +1,16 @@
 import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
-import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension } from './src/utils';
+import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder } from './src/utils';
 
 interface ImageLinkUpdaterSettings {
   debugEnabled: boolean;
+  smartAttachmentFolder: boolean;
+  smartFolderNames: string;
 }
 
 const DEFAULT_SETTINGS: ImageLinkUpdaterSettings = {
   debugEnabled: false,
+  smartAttachmentFolder: false,
+  smartFolderNames: 'assets, images',
 };
 
 
@@ -81,12 +85,17 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           const base = `Pasted image ${this.timestamp()}`;
           const filename = `${base}.${ext}`;
 
-          // M1: use the public getAvailablePathForAttachment API (respects all
-          // attachment folder modes incl. relative "./attachments").
-          // filename already includes the extension; sourcePath is the active note.
-          const dest = normalizePath(
-            await this.app.fileManager.getAvailablePathForAttachment(filename, activeFile.path)
-          );
+          // Resolve destination path: smart folder mode or Obsidian's default API.
+          let dest: string;
+          if (this.settings.smartAttachmentFolder) {
+            dest = await this.resolveSmartDest(filename, activeFile);
+          } else {
+            // M1: use the public getAvailablePathForAttachment API (respects all
+            // attachment folder modes incl. relative "./attachments").
+            dest = normalizePath(
+              await this.app.fileManager.getAvailablePathForAttachment(filename, activeFile.path)
+            );
+          }
 
           const arrayBuf = await blob.arrayBuffer();
           await this.app.vault.createBinary(dest, arrayBuf);
@@ -191,6 +200,52 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  /**
+   * Resolve the paste destination using the Smart attachment folder logic.
+   * Collects sibling folder names from the vault and delegates to the pure
+   * resolveSmartAttachmentFolder function, then gets a unique path within that folder.
+   */
+  private async resolveSmartDest(filename: string, activeFile: TFile): Promise<string> {
+    const noteParent = activeFile.parent;
+    // Collect names of all direct-child folders of the note's parent folder
+    const siblingFolderNames: string[] = (noteParent?.children ?? [])
+      .filter((f): f is TFolder => f instanceof TFolder)
+      .map((f) => f.name);
+
+    const priorityList = parseSmartFolderNames(this.settings.smartFolderNames);
+    const folderPath = resolveSmartAttachmentFolder(
+      activeFile.path,
+      siblingFolderNames,
+      priorityList
+    );
+
+    // Ensure the resolved folder exists before writing into it
+    if (folderPath) {
+      try {
+        await this.app.vault.createFolder(folderPath);
+      } catch {
+        // folder already exists — safe to ignore
+      }
+    }
+
+    const candidatePath = folderPath ? normalizePath(`${folderPath}/${filename}`) : filename;
+    // Use the vault adapter to find a unique path (avoid overwriting existing files)
+    let dest = candidatePath;
+    const dotIdx = filename.lastIndexOf('.');
+    const stem = dotIdx !== -1 ? filename.slice(0, dotIdx) : filename;
+    const ext  = dotIdx !== -1 ? filename.slice(dotIdx)    : '';
+    let attempt = 0;
+    while (await this.app.vault.adapter.exists(dest)) {
+      attempt++;
+      const unique = folderPath
+        ? normalizePath(`${folderPath}/${stem} ${attempt}${ext}`)
+        : `${stem} ${attempt}${ext}`;
+      dest = unique;
+    }
+
+    return dest;
   }
 
   private logDebug(...data: unknown[]) {
@@ -412,6 +467,24 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
           defaultValue: false,
         },
       },
+      {
+        name: 'Smart attachment folder',
+        desc: 'When enabled, pasted images are saved to the first matching sibling folder from the priority list instead of the global attachment folder.',
+        control: {
+          type: 'toggle',
+          key: 'smartAttachmentFolder',
+          defaultValue: false,
+        },
+      },
+      {
+        name: 'Smart folder names',
+        desc: 'Comma-separated list of sibling folder names to check (in priority order). Only used when Smart attachment folder is on.',
+        control: {
+          type: 'text',
+          key: 'smartFolderNames',
+          defaultValue: 'assets, images',
+        },
+      },
     ];
   }
 
@@ -430,6 +503,44 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.debugEnabled)
           .onChange(async (value) => {
             this.plugin.settings.debugEnabled = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    // Keep a reference to the folder-names setting so the toggle can update its disabled state.
+    let folderNamesSetting: Setting | null = null;
+
+    new Setting(containerEl)
+      .setName('Smart attachment folder')
+      .setDesc(
+        'When enabled, pasted images are saved to the first folder in the priority list ' +
+        "that already exists as a sibling of the active note's folder. " +
+        'If none exists, images are saved into the note\'s own folder. ' +
+        'When disabled (default), Obsidian\'s global attachment folder setting is used.'
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.smartAttachmentFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.smartAttachmentFolder = value;
+            await this.plugin.saveSettings();
+            folderNamesSetting?.setDisabled(!value);
+          })
+      );
+
+    folderNamesSetting = new Setting(containerEl)
+      .setName('Smart folder names')
+      .setDesc(
+        'Comma-separated priority list of sibling folder names to check (e.g. "assets, images"). ' +
+        'Matching is case-sensitive. Only takes effect when Smart attachment folder is on.'
+      )
+      .setDisabled(!this.plugin.settings.smartAttachmentFolder)
+      .addText((text) =>
+        text
+          .setPlaceholder('Assets, images')
+          .setValue(this.plugin.settings.smartFolderNames)
+          .onChange(async (value) => {
+            this.plugin.settings.smartFolderNames = value;
             await this.plugin.saveSettings();
           })
       );
