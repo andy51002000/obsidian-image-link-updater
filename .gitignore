@@ -1,4 +1,7 @@
 .DS_Store
+# Internal audit reports — not for publication
+SEO_AUDIT_REPORT.md
+GEO_AUDIT_REPORT.md
 node_modules/
 package-lock.json
 dist/
