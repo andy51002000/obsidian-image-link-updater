@@ -7,7 +7,9 @@ import {
   applyLinkReplacements,
   parseSmartFolderNames,
   resolveSmartAttachmentFolder,
+  findCandidateSourcePaths,
 } from '../src/utils';
+import type { ResolvedLinkMap, UnresolvedLinkMap } from '../src/utils';
 
 // ---------------------------------------------------------------------------
 // escapeRegExp
@@ -298,5 +300,110 @@ describe('resolveSmartAttachmentFolder', () => {
     );
     // parent is '' — fallback is vault root
     expect(result).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findCandidateSourcePaths — metadata-cache targeted source selection
+// ---------------------------------------------------------------------------
+describe('findCandidateSourcePaths', () => {
+  // Helpers to build link-map fixtures
+  const resolved = (entries: Record<string, string[]>): ResolvedLinkMap =>
+    Object.fromEntries(
+      Object.entries(entries).map(([src, dests]) => [
+        src,
+        Object.fromEntries(dests.map((d) => [d, 1])),
+      ])
+    );
+
+  const unresolved = (entries: Record<string, string[]>): UnresolvedLinkMap =>
+    Object.fromEntries(
+      Object.entries(entries).map(([src, keys]) => [
+        src,
+        Object.fromEntries(keys.map((k) => [k, 1])),
+      ])
+    );
+
+  it('finds source via full path in resolvedLinks', () => {
+    const r = resolved({ 'notes/note.md': ['attachments/photo.png'] });
+    const result = findCandidateSourcePaths('attachments/photo.png', r, {});
+    expect(result).toEqual(['notes/note.md']);
+  });
+
+  it('finds source via bare filename in unresolvedLinks (OS-move fallback)', () => {
+    const u = unresolved({ 'notes/note.md': ['photo.png'] });
+    const result = findCandidateSourcePaths('photo.png', {}, u);
+    expect(result).toEqual(['notes/note.md']);
+  });
+
+  it('finds source via URI-encoded filename in unresolvedLinks', () => {
+    const u = unresolved({ 'notes/note.md': ['Pasted%20image.png'] });
+    const result = findCandidateSourcePaths('Pasted image.png', {}, u);
+    expect(result).toEqual(['notes/note.md']);
+  });
+
+  it('finds source via partial-path key ending with /filename in unresolvedLinks', () => {
+    const u = unresolved({ 'notes/note.md': ['attachments/photo.png'] });
+    const result = findCandidateSourcePaths('photo.png', {}, u);
+    expect(result).toEqual(['notes/note.md']);
+  });
+
+  it('finds source via full-path key in unresolvedLinks', () => {
+    const u = unresolved({ 'notes/note.md': ['attachments/photo.png'] });
+    const result = findCandidateSourcePaths('attachments/photo.png', {}, u);
+    expect(result).toEqual(['notes/note.md']);
+  });
+
+  it('returns both resolved and unresolved candidates, deduplicated', () => {
+    const r = resolved({ 'notes/note.md': ['attachments/photo.png'] });
+    // Same source also has an unresolved entry for the same file
+    const u = unresolved({ 'notes/note.md': ['photo.png'], 'other/other.md': ['photo.png'] });
+    const result = findCandidateSourcePaths('attachments/photo.png', r, u);
+    // notes/note.md appears in both — must be deduplicated
+    expect(result).toContain('notes/note.md');
+    // other/other.md matched via bare name
+    expect(result).toContain('other/other.md');
+    expect(result.filter((p) => p === 'notes/note.md')).toHaveLength(1);
+  });
+
+  it('does NOT include unrelated files that reference other images', () => {
+    const r = resolved({ 'notes/unrelated.md': ['attachments/other.png'] });
+    const result = findCandidateSourcePaths('attachments/photo.png', r, {});
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty array when both maps are empty (cache not ready)', () => {
+    const result = findCandidateSourcePaths('photo.png', {}, {});
+    expect(result).toEqual([]);
+  });
+
+  it('returns sorted results for determinism', () => {
+    const r = resolved({
+      'z-note.md': ['photo.png'],
+      'a-note.md': ['photo.png'],
+    });
+    const result = findCandidateSourcePaths('photo.png', r, {});
+    expect(result).toEqual(['a-note.md', 'z-note.md']);
+  });
+
+  it('handles multiple sources referencing the same image', () => {
+    const r = resolved({
+      'notes/a.md': ['attachments/photo.png'],
+      'notes/b.md': ['attachments/photo.png'],
+      'notes/c.md': ['attachments/other.png'],
+    });
+    const result = findCandidateSourcePaths('attachments/photo.png', r, {});
+    expect(result).toEqual(['notes/a.md', 'notes/b.md']);
+  });
+
+  it('wiki-link bare-name match via unresolvedLinks (Markdown and wiki refs)', () => {
+    // Wiki links like ![[photo.png]] are stored as bare filename in unresolvedLinks
+    // when the file cannot be resolved to a known path.
+    const u = unresolved({
+      'docs/page.md': ['photo.png'],
+      'docs/page2.md': ['subfolder/photo.png'],
+    });
+    const result = findCandidateSourcePaths('photo.png', {}, u);
+    expect(result).toEqual(['docs/page.md', 'docs/page2.md']);
   });
 });

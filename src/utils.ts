@@ -4,6 +4,80 @@
  */
 
 /**
+ * Types for MetadataCache link maps (mirrors Obsidian's public API shape).
+ * Using plain object types keeps this module free of the Obsidian runtime.
+ */
+export type ResolvedLinkMap   = Record<string, Record<string, number>>;
+export type UnresolvedLinkMap = Record<string, Record<string, number>>;
+
+/**
+ * Find all Markdown source paths that reference the given image — by full
+ * vault path (resolved) or by bare/encoded filename (unresolved / broken).
+ *
+ * Used for rename/move (full-path match preferred) AND for OS-level
+ * delete+create fallback (filename match against unresolved links, which is
+ * where a broken link lands after the file was moved outside Obsidian).
+ *
+ * Algorithm:
+ *   Pass 1 — resolvedLinks: collect every source path whose resolved targets
+ *     include `imagePath` (exact match on the full vault path).
+ *   Pass 2 — unresolvedLinks: collect every source path whose unresolved link
+ *     keys match `imageFileName` (bare name) or its URI-encoded form, OR whose
+ *     key ends with `/<imageFileName>` (partial-path form).
+ *     Also accept `imagePath` itself as an unresolved key (recorded before the
+ *     file was indexed with the new location).
+ *
+ * Results are de-duplicated and returned as a sorted array for determinism.
+ *
+ * Case-sensitivity: vault paths on Obsidian are case-sensitive on most
+ * platforms; we do a case-sensitive match (same as the replacement regex).
+ *
+ * @param imagePath      Full vault-root path of the image being tracked,
+ *                       e.g. "english-class/photo.png". May be the OLD path
+ *                       (rename) or the NEW path (create fallback).
+ * @param resolvedLinks  MetadataCache.resolvedLinks snapshot.
+ * @param unresolvedLinks MetadataCache.unresolvedLinks snapshot.
+ * @returns De-duplicated sorted list of Markdown file paths that reference
+ *          this image and should have their links updated.
+ */
+export function findCandidateSourcePaths(
+  imagePath: string,
+  resolvedLinks: ResolvedLinkMap,
+  unresolvedLinks: UnresolvedLinkMap
+): string[] {
+  const candidates = new Set<string>();
+
+  const imageFileName = imagePath.split('/').pop() ?? imagePath;
+  const imageFileNameEnc = encodeURI(imageFileName);
+
+  // Pass 1: exact full-path match in resolvedLinks
+  for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
+    if (Object.prototype.hasOwnProperty.call(targets, imagePath)) {
+      candidates.add(sourcePath);
+    }
+  }
+
+  // Pass 2: filename / partial-path / full-path match in unresolvedLinks
+  // (broken links — the image doesn't exist at any known path yet)
+  for (const [sourcePath, targets] of Object.entries(unresolvedLinks)) {
+    for (const linkKey of Object.keys(targets)) {
+      if (
+        linkKey === imagePath ||
+        linkKey === imageFileName ||
+        linkKey === imageFileNameEnc ||
+        linkKey.endsWith(`/${imageFileName}`) ||
+        linkKey.endsWith(`/${imageFileNameEnc}`)
+      ) {
+        candidates.add(sourcePath);
+        break; // one match per source is enough
+      }
+    }
+  }
+
+  return [...candidates].sort();
+}
+
+/**
  * Parse a comma-separated folder priority list into a clean ordered array.
  * Trims whitespace from each entry; ignores empty entries.
  */

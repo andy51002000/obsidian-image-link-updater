@@ -144,8 +144,8 @@ Yes. The two plugins complement each other. See the [comparison table](#quick-co
 
 When you move or rename image files, the plugin:
 1. Listens for Obsidian vault `rename` and `create` events
-2. Searches all Markdown files for references to the old path
-3. Rewrites links to use vault-root absolute paths
+2. Uses Obsidian's **metadata cache** (`MetadataCache.resolvedLinks` and `unresolvedLinks`) to identify only the notes that actually reference the affected image — no vault-wide file scan
+3. Rewrites links to use vault-root absolute paths in those notes only
 4. Handles both standard Markdown image links and wiki-image embed formats
 5. Skips links inside fenced code blocks to avoid rewriting examples
 

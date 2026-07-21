@@ -1,5 +1,5 @@
 import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
-import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder } from './src/utils';
+import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths } from './src/utils';
 
 interface ImageLinkUpdaterSettings {
   debugEnabled: boolean;
@@ -381,13 +381,28 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     return normalized.startsWith('/') ? normalized : `/${normalized}`;
   }
 
-  /** Update links using both full old path and file name */
+  /**
+   * Update links after a vault rename/move event.
+   *
+   * Candidate notes are selected via MetadataCache.resolvedLinks (exact full-path
+   * match) and unresolvedLinks (bare/encoded filename match). Only notes that
+   * actually reference the image are processed — no vault-wide enumeration.
+   */
   private async updateImageLinks(oldPath: string, newPath: string) {
-    const mdFiles = this.app.vault.getMarkdownFiles();
     const oldFileName = oldPath.split('/').pop() ?? '';
     const abs = this.ensureLeadingSlash(newPath);
+    const cache = this.app.metadataCache;
 
-    for (const md of mdFiles) {
+    const candidatePaths = findCandidateSourcePaths(
+      oldPath,
+      cache.resolvedLinks,
+      cache.unresolvedLinks
+    );
+    this.logDebug('updateImageLinks candidates', candidatePaths);
+
+    for (const sourcePath of candidatePaths) {
+      const md = this.app.vault.getFileByPath(sourcePath);
+      if (!md) continue;
       try {
         await this.app.vault.process(md, (content: string) => {
           const updated = applyLinkReplacements(content, oldPath, oldFileName, abs);
@@ -403,12 +418,43 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     }
   }
 
-  /** Update links by file name only (used on create fallback) */
+  /**
+   * Update links by filename only — used when a file appears via a delete+create
+   * event pair (OS-level move outside Obsidian while Obsidian was open).
+   *
+   * When a file is moved outside Obsidian, the old path is gone so resolvedLinks
+   * won't have it. The old (now-broken) links land in unresolvedLinks under the
+   * bare filename or partial path. We search unresolvedLinks with the new filename
+   * (which equals the old filename since only the folder changed in an OS move).
+   *
+   * Design note: if unresolvedLinks is empty (cache not yet ready), we surface a
+   * Notice and return without touching any files — we never fall back to a full
+   * vault enumeration. The rename handler (which does have resolvedLinks) covers
+   * in-Obsidian moves; this fallback is only for the edge case of OS-level moves.
+   */
   private async updateImageLinksByFilename(fileName: string, newPath: string) {
-    const mdFiles = this.app.vault.getMarkdownFiles();
     const abs = this.ensureLeadingSlash(newPath);
+    const cache = this.app.metadataCache;
 
-    for (const md of mdFiles) {
+    // For the OS-move create fallback, the broken link lives in unresolvedLinks.
+    // We pass the filename as the imagePath so findCandidateSourcePaths matches
+    // bare-filename keys (e.g. "photo.png") and partial-path keys ending with
+    // "/photo.png" in unresolvedLinks.
+    const candidatePaths = findCandidateSourcePaths(
+      fileName,
+      cache.resolvedLinks,
+      cache.unresolvedLinks
+    );
+    this.logDebug('updateImageLinksByFilename candidates', candidatePaths);
+
+    if (candidatePaths.length === 0) {
+      this.logDebug('No candidates found for', fileName, '— cache may not be ready yet');
+      return;
+    }
+
+    for (const sourcePath of candidatePaths) {
+      const md = this.app.vault.getFileByPath(sourcePath);
+      if (!md) continue;
       try {
         await this.app.vault.process(md, (content: string) => {
           const updated = applyLinkReplacements(content, fileName, fileName, abs);
