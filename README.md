@@ -1,9 +1,8 @@
 # Image Link Updater
 
-[![Version](https://img.shields.io/github/v/release/andy51002000/obsidian-image-link-updater)](https://github.com/andy51002000/obsidian-image-link-updater/releases/latest)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-**Image Link Updater** is a free, open-source Obsidian plugin (AGPL-3.0, desktop) that automatically rewrites broken image links vault-wide whenever you rename, move, or reorganize image files — so your notes always display correctly without any manual link-fixing.
+**Image Link Updater** is a free, open-source Obsidian plugin (MIT, desktop) that automatically rewrites broken image links vault-wide whenever you rename, move, or reorganize image files — so your notes always display correctly without any manual link-fixing.
 
 **Stop losing images when you reorganise your vault.** It also intercepts clipboard paste events to save images as standard Markdown links instead of Obsidian's default wiki-link format, and adds a right-click **Cut & Paste** command that moves files and updates every reference in one step.
 
@@ -12,7 +11,7 @@
 - ✂️ **Cut & Paste via right-click context menu** → move one or many files with automatic link updates across your entire vault.
 - 🗃️ **Moved outside Obsidian?** The plugin detects delete+create events and still repairs links by filename.
 
-> **Platform:** Desktop only (Windows, macOS, Linux) &nbsp;|&nbsp; **License:** AGPL-3.0 &nbsp;|&nbsp; **Version:** 1.3.13 &nbsp;|&nbsp; **Requires:** Obsidian ≥ 1.5.7
+> **Platform:** Desktop only (Windows, macOS, Linux) &nbsp;|&nbsp; **License:** MIT &nbsp;|&nbsp; **Version:** 1.3.16 &nbsp;|&nbsp; **Requires:** Obsidian ≥ 1.5.7
 
 ---
 
@@ -83,7 +82,7 @@ Several plugins tackle overlapping problems. Here is an honest summary to help y
 | Reorganize entire vault attachment structure | ❌ | ✅ | ❌ |
 | Rename image at paste time | ❌ | ❌ | ✅ |
 | Mobile support | ❌ Desktop only | ✅ | ✅ |
-| License | AGPL-3.0 (free) | MIT (free) | MIT (free) |
+| License | MIT (free) | MIT (free) | MIT (free) |
 
 **Choose Image Link Updater if:** you want broken-link prevention to happen automatically in the background — no commands to run, no batch operations. Just install, enable, and keep working.
 
@@ -103,7 +102,7 @@ Several plugins tackle overlapping problems. Here is an honest summary to help y
 
 ### Manual install
 
-1. Download `manifest.json` and `main.js` from the [latest release](https://github.com/andy51002000/obsidian-image-link-updater/releases/latest)
+1. Download `manifest.json` and `main.js` from the latest GitHub release
 2. Create the folder `<your vault>/.obsidian/plugins/image-link-updater/`
 3. Place both files inside:
 
@@ -206,19 +205,18 @@ The plugin also respects your existing Obsidian settings:
 | Field | Value |
 |---|---|
 | **Plugin ID** | `image-link-updater` |
-| **Version** | 1.3.13 |
+| **Version** | 1.3.16 |
 | **Author** | Andy Lai |
-| **License** | AGPL-3.0-or-later (free, open-source) |
+| **License** | MIT (free, open-source) |
 | **Platform** | Desktop only (Windows, macOS, Linux) |
 | **Minimum Obsidian** | 1.5.7 |
-| **Repository** | https://github.com/andy51002000/obsidian-image-link-updater |
 | **Community listing** | https://obsidian.md/plugins?id=image-link-updater |
 
 ---
 
 ## License
 
-Image Link Updater is released under the [GNU Affero General Public License v3.0 or later](./LICENSE).
+Image Link Updater is released under the [MIT License](./LICENSE).
 
 ---
 
@@ -226,7 +224,7 @@ Image Link Updater is released under the [GNU Affero General Public License v3.0
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/andy51002000/obsidian-image-link-updater.git
+git clone <repository-url>
 cd obsidian-image-link-updater
 
 # 2. Install dependencies
