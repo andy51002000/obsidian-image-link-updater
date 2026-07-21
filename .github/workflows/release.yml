@@ -24,7 +24,10 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
 
       - name: Build and prepare release
         run: npm run release
@@ -52,9 +55,9 @@ jobs:
       - name: Generate artifact attestation
         uses: actions/attest@v4
         with:
-          subject-path: |
-            release/${{ steps.manifest.outputs.id }}/main.js
-            release/${{ steps.manifest.outputs.id }}/manifest.json
+          # Same newline-delimited list that is uploaded to the release below,
+          # so every published asset carries a provenance attestation.
+          subject-path: ${{ steps.package.outputs.files }}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
