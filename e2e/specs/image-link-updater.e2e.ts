@@ -18,7 +18,7 @@
  */
 
 import { browser } from "@wdio/globals";
-import { FileSystemAdapter, TFile } from "obsidian";
+import { FileSystemAdapter } from "obsidian";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -49,13 +49,14 @@ async function getCurrentVaultPath(): Promise<string> {
 async function fireRename(oldPath: string, newPath: string): Promise<void> {
   await browser.executeObsidian(
     ({ app, obsidian }, old_p, new_p) => {
-      const o = obsidian.normalizePath(old_p as string);
-      const n = obsidian.normalizePath(new_p as string);
+      const o = obsidian.normalizePath(old_p);
+      const n = obsidian.normalizePath(new_p);
       const file = app.vault.getAbstractFileByPath(o);
       if (!file) throw new Error(`File not found in vault: ${o}`);
+      if (!(file instanceof obsidian.TFile)) throw new Error(`Path is not a file: ${o}`);
       // Fire-and-forget — the rename + plugin link update runs asynchronously.
       // The script returns immediately before the renderer blocks.
-      app.fileManager.renameFile(file as TFile, n).catch(console.error);
+      app.fileManager.renameFile(file, n).catch(console.error);
     },
     oldPath,
     newPath
@@ -79,7 +80,7 @@ async function waitForFileContent(
       const content = fs.readFileSync(absPath, "utf8");
       if (predicate(content)) return content;
     }
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => window.setTimeout(r, 300));
   }
   const content = fs.existsSync(absPath)
     ? fs.readFileSync(absPath, "utf8")
@@ -249,7 +250,7 @@ describe("Scenario 5 – Startup safety: no note files modified on vault open", 
 
   it("no note files were modified just from opening the vault", async function () {
     // Allow time for any spurious create-event processing to settle
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise((r) => window.setTimeout(r, 5000));
 
     const violations: string[] = [];
     for (const [rel, mtimeBefore] of Object.entries(mtimesBefore)) {
