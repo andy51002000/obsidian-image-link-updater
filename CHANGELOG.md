@@ -4,6 +4,21 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.17] - 2026-07-21
+
+### Changed
+
+- **Faster, more private link updates** — Link updates no longer enumerate every file in the vault. The plugin now uses Obsidian's metadata cache (`resolvedLinks`) to target only the notes that actually reference the renamed or moved image, which is faster in large vaults and means the plugin no longer requests a listing of every file path.
+- **More robust link repair after quick successive moves** — Metadata-cache lookups now use a bounded retry with per-destination-path isolation, so moving several images in quick succession (or moving the same image twice quickly) can no longer cause one update to cancel or starve another.
+
+### Internal
+
+- Cleaned up the remaining automated-review warnings in the E2E test suite (unnecessary type assertions, `TFile` cast, bare `setTimeout`).
+- Committed `package-lock.json` and switched CI to `npm ci` so builds are reproducible byte-for-byte.
+- Release workflow now generates GitHub build provenance attestations (`actions/attest@v4`) for every published asset, and runs the unit test suite before building.
+
+---
+
 ## [1.3.16] - 2026-07-19
 
 ### Changed
