@@ -19,6 +19,7 @@
 
 import { browser } from "@wdio/globals";
 import { FileSystemAdapter } from "obsidian";
+import { setTimeout as delay } from "node:timers/promises";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -80,7 +81,7 @@ async function waitForFileContent(
       const content = fs.readFileSync(absPath, "utf8");
       if (predicate(content)) return content;
     }
-    await new Promise((r) => window.setTimeout(r, 300));
+    await delay(300);
   }
   const content = fs.existsSync(absPath)
     ? fs.readFileSync(absPath, "utf8")
@@ -250,7 +251,7 @@ describe("Scenario 5 – Startup safety: no note files modified on vault open", 
 
   it("no note files were modified just from opening the vault", async function () {
     // Allow time for any spurious create-event processing to settle
-    await new Promise((r) => window.setTimeout(r, 5000));
+    await delay(5000);
 
     const violations: string[] = [];
     for (const [rel, mtimeBefore] of Object.entries(mtimesBefore)) {

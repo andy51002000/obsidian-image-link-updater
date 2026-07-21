@@ -1,5 +1,6 @@
-import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice } from 'obsidian';
-import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths } from './src/utils';
+import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice, EventRef } from 'obsidian';
+import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths, createRetryTask, advanceRetryTask } from './src/utils';
+import type { RetryTaskState } from './src/utils';
 
 interface ImageLinkUpdaterSettings {
   debugEnabled: boolean;
@@ -32,6 +33,17 @@ const DEFAULT_SETTINGS: ImageLinkUpdaterSettings = {
 export default class ImageLinkUpdaterPlugin extends Plugin {
   private cutFiles: TFile[] = [];
   settings: ImageLinkUpdaterSettings = { ...DEFAULT_SETTINGS };
+
+  /**
+   * Bounded retry queue for OS-level create fallback.
+   * Key = filename; value = current task state + cleanup refs.
+   * Deduplicates concurrent events for the same file.
+   */
+  private pendingRetries = new Map<string, {
+    state: RetryTaskState;
+    resolvedRef: EventRef | null;
+    deadlineTimer: number | null;
+  }>();
 
   async onload() {
     await this.loadSettings();
@@ -193,6 +205,11 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         }
       })
     );
+  }
+
+  onunload() {
+    // Cancel all pending OS-move retry tasks on plugin unload.
+    this.cancelAllRetries();
   }
 
   async loadSettings() {
@@ -419,38 +436,39 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   }
 
   /**
-   * Update links by filename only — used when a file appears via a delete+create
-   * event pair (OS-level move outside Obsidian while Obsidian was open).
+   * Update links by filename — used when a file appears via a delete+create event
+   * pair (OS-level move outside Obsidian while Obsidian was open).
    *
-   * When a file is moved outside Obsidian, the old path is gone so resolvedLinks
-   * won't have it. The old (now-broken) links land in unresolvedLinks under the
-   * bare filename or partial path. We search unresolvedLinks with the new filename
-   * (which equals the old filename since only the folder changed in an OS move).
+   * The broken link lives in unresolvedLinks[sourcePath][filename] because the
+   * file no longer exists at the old path. We search with the new filename (same
+   * as the old filename since only the folder changed).
    *
-   * Design note: if unresolvedLinks is empty (cache not yet ready), we surface a
-   * Notice and return without touching any files — we never fall back to a full
-   * vault enumeration. The rename handler (which does have resolvedLinks) covers
-   * in-Obsidian moves; this fallback is only for the edge case of OS-level moves.
+   * If the cache has no candidates yet (still indexing), we enqueue a bounded
+   * retry that fires on each 'resolved' cache event, up to RETRY_MAX_ATTEMPTS
+   * times or RETRY_DEADLINE_MS total — whichever comes first.
    */
   private async updateImageLinksByFilename(fileName: string, newPath: string) {
+    const found = await this.tryApplyByFilename(fileName, newPath);
+    if (!found) {
+      this.enqueueRetry(fileName, newPath);
+    }
+  }
+
+  /**
+   * Attempt a single cache-driven link update by filename.
+   * Returns true if candidates were found and processed, false if cache was empty.
+   */
+  private async tryApplyByFilename(fileName: string, newPath: string): Promise<boolean> {
     const abs = this.ensureLeadingSlash(newPath);
     const cache = this.app.metadataCache;
-
-    // For the OS-move create fallback, the broken link lives in unresolvedLinks.
-    // We pass the filename as the imagePath so findCandidateSourcePaths matches
-    // bare-filename keys (e.g. "photo.png") and partial-path keys ending with
-    // "/photo.png" in unresolvedLinks.
     const candidatePaths = findCandidateSourcePaths(
       fileName,
       cache.resolvedLinks,
       cache.unresolvedLinks
     );
-    this.logDebug('updateImageLinksByFilename candidates', candidatePaths);
+    this.logDebug('tryApplyByFilename candidates', { fileName, candidatePaths });
 
-    if (candidatePaths.length === 0) {
-      this.logDebug('No candidates found for', fileName, '— cache may not be ready yet');
-      return;
-    }
+    if (candidatePaths.length === 0) return false;
 
     for (const sourcePath of candidatePaths) {
       const md = this.app.vault.getFileByPath(sourcePath);
@@ -467,6 +485,88 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
         console.error('[ImageLinkUpdater] Failed to update links in', md.path, err);
         new Notice(`Image Link Updater: failed to update ${md.name} — see console for details`);
       }
+    }
+    return true;
+  }
+
+  /**
+   * Enqueue a bounded retry for a filename whose cache candidates were not found.
+   * Deduplicated by filename — a second create event for the same file replaces
+   * any existing pending task (cancels the old one first).
+   *
+   * Retry triggers:
+   *   1. metadataCache 'resolved' event — fires when a file's cache entry is ready.
+   *   2. Bounded deadline timer — gives up after RETRY_DEADLINE_MS total.
+   *
+   * At most RETRY_MAX_ATTEMPTS 'resolved' events are consumed per task.
+   * On unload, cancelAllRetries() tears down all listeners and timers.
+   */
+  private enqueueRetry(fileName: string, newPath: string) {
+    // Deduplicate: cancel existing task for this filename if present
+    this.cancelRetry(fileName);
+
+    const state = createRetryTask(fileName, newPath, Date.now());
+    this.logDebug('enqueueRetry', { fileName, maxAttempts: state.attempts });
+
+    const entry: {
+      state: RetryTaskState;
+      resolvedRef: EventRef | null;
+      deadlineTimer: number | null;
+    } = { state, resolvedRef: null, deadlineTimer: null };
+
+    const cleanup = () => {
+      this.cancelRetry(fileName);
+    };
+
+    const onResolved = () => {
+      const current = this.pendingRetries.get(fileName);
+      if (!current) return;
+
+      const next = advanceRetryTask(current.state, Date.now());
+      if (!next) {
+        this.logDebug('retry exhausted for', fileName);
+        cleanup();
+        return;
+      }
+      current.state = next;
+
+      this.tryApplyByFilename(fileName, newPath).then((found) => {
+        if (found) cleanup();
+      }).catch((err) => {
+        console.error('[ImageLinkUpdater] retry error for', fileName, err);
+        cleanup();
+      });
+    };
+
+    const deadlineTimer = window.setTimeout(() => {
+      this.logDebug('retry deadline reached for', fileName);
+      cleanup();
+    }, state.deadlineMs - Date.now());
+
+    const resolvedRef = this.app.metadataCache.on('resolved', onResolved);
+
+    entry.resolvedRef = resolvedRef;
+    entry.deadlineTimer = deadlineTimer;
+    this.pendingRetries.set(fileName, entry);
+  }
+
+  /** Cancel a single pending retry task and tear down its resources. */
+  private cancelRetry(fileName: string) {
+    const entry = this.pendingRetries.get(fileName);
+    if (!entry) return;
+    if (entry.resolvedRef) {
+      this.app.metadataCache.offref(entry.resolvedRef);
+    }
+    if (entry.deadlineTimer !== null) {
+      window.clearTimeout(entry.deadlineTimer);
+    }
+    this.pendingRetries.delete(fileName);
+  }
+
+  /** Cancel all pending retry tasks — called from onunload(). */
+  private cancelAllRetries() {
+    for (const fileName of this.pendingRetries.keys()) {
+      this.cancelRetry(fileName);
     }
   }
 

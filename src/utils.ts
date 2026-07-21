@@ -313,3 +313,58 @@ export function applyLinkReplacements(
 
   return updated;
 }
+
+// ---------------------------------------------------------------------------
+// Metadata-cache retry queue — pure state helpers (no Obsidian runtime)
+// ---------------------------------------------------------------------------
+
+/**
+ * Immutable state for a single filename-retry task.
+ * Stored and mutated via createRetryTask / advanceRetryTask.
+ */
+export interface RetryTaskState {
+  readonly fileName: string;
+  readonly newPath: string;
+  readonly attempts: number;
+  readonly deadlineMs: number;   // absolute epoch ms after which we give up
+}
+
+/** Maximum number of 'resolved' cache events to tolerate per task before giving up. */
+export const RETRY_MAX_ATTEMPTS = 5;
+
+/** Total wall-clock budget (ms) for all retries of a single task. */
+export const RETRY_DEADLINE_MS = 10_000;
+
+/**
+ * Create the initial retry task state.
+ * `nowMs` is injected for testability (caller passes Date.now()).
+ */
+export function createRetryTask(
+  fileName: string,
+  newPath: string,
+  nowMs: number
+): RetryTaskState {
+  return {
+    fileName,
+    newPath,
+    attempts: 0,
+    deadlineMs: nowMs + RETRY_DEADLINE_MS,
+  };
+}
+
+/**
+ * Returns whether a retry should proceed, and the advanced state to store.
+ *
+ * Decision:
+ *   - If attempts >= RETRY_MAX_ATTEMPTS → give up (return null).
+ *   - If nowMs >= deadlineMs            → give up (return null).
+ *   - Otherwise: increment attempts and return updated state.
+ */
+export function advanceRetryTask(
+  task: RetryTaskState,
+  nowMs: number
+): RetryTaskState | null {
+  if (task.attempts >= RETRY_MAX_ATTEMPTS) return null;
+  if (nowMs >= task.deadlineMs) return null;
+  return { ...task, attempts: task.attempts + 1 };
+}

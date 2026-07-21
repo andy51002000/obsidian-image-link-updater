@@ -8,6 +8,10 @@ import {
   parseSmartFolderNames,
   resolveSmartAttachmentFolder,
   findCandidateSourcePaths,
+  createRetryTask,
+  advanceRetryTask,
+  RETRY_MAX_ATTEMPTS,
+  RETRY_DEADLINE_MS,
 } from '../src/utils';
 import type { ResolvedLinkMap, UnresolvedLinkMap } from '../src/utils';
 
@@ -405,5 +409,87 @@ describe('findCandidateSourcePaths', () => {
     });
     const result = findCandidateSourcePaths('photo.png', {}, u);
     expect(result).toEqual(['docs/page.md', 'docs/page2.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Metadata cache retry state — createRetryTask / advanceRetryTask
+// ---------------------------------------------------------------------------
+describe('createRetryTask', () => {
+  it('creates task with 0 attempts and correct deadline', () => {
+    const now = 1_000_000;
+    const task = createRetryTask('photo.png', '/attachments/photo.png', now);
+    expect(task.fileName).toBe('photo.png');
+    expect(task.newPath).toBe('/attachments/photo.png');
+    expect(task.attempts).toBe(0);
+    expect(task.deadlineMs).toBe(now + RETRY_DEADLINE_MS);
+  });
+});
+
+describe('advanceRetryTask', () => {
+  const now = 1_000_000;
+  const deadline = now + RETRY_DEADLINE_MS;
+
+  it('returns advanced state on first attempt', () => {
+    const task = createRetryTask('photo.png', '/path.png', now);
+    const next = advanceRetryTask(task, now + 100);
+    expect(next).not.toBeNull();
+    expect(next!.attempts).toBe(1);
+  });
+
+  it('increments attempts on each advance', () => {
+    let task = createRetryTask('photo.png', '/path.png', now);
+    for (let i = 1; i <= RETRY_MAX_ATTEMPTS - 1; i++) {
+      const next = advanceRetryTask(task, now + i * 100);
+      expect(next).not.toBeNull();
+      task = next!;
+      expect(task.attempts).toBe(i);
+    }
+  });
+
+  it('returns null when attempts reach RETRY_MAX_ATTEMPTS', () => {
+    let task = createRetryTask('photo.png', '/path.png', now);
+    // Advance to the limit
+    for (let i = 0; i < RETRY_MAX_ATTEMPTS; i++) {
+      const next = advanceRetryTask(task, now + 100);
+      expect(next).not.toBeNull();
+      task = next!;
+    }
+    // One more — should now be null
+    const exhausted = advanceRetryTask(task, now + 200);
+    expect(exhausted).toBeNull();
+  });
+
+  it('returns null when deadline has passed', () => {
+    const task = createRetryTask('photo.png', '/path.png', now);
+    const afterDeadline = advanceRetryTask(task, deadline + 1);
+    expect(afterDeadline).toBeNull();
+  });
+
+  it('returns null exactly at deadline (boundary)', () => {
+    const task = createRetryTask('photo.png', '/path.png', now);
+    const atDeadline = advanceRetryTask(task, deadline);
+    expect(atDeadline).toBeNull();
+  });
+
+  it('succeeds just before deadline', () => {
+    const task = createRetryTask('photo.png', '/path.png', now);
+    const justBefore = advanceRetryTask(task, deadline - 1);
+    expect(justBefore).not.toBeNull();
+  });
+
+  it('dedupe: two tasks for same file are independent state objects', () => {
+    const t1 = createRetryTask('a.png', '/p1.png', now);
+    const t2 = createRetryTask('a.png', '/p2.png', now);
+    advanceRetryTask(t1, now + 100);
+    // t1 advancing must not affect t2 (immutable state)
+    expect(t2.attempts).toBe(0);
+  });
+
+  it('preserves fileName and newPath through advances', () => {
+    const task = createRetryTask('my image.png', '/folder/my image.png', now);
+    const next = advanceRetryTask(task, now + 1);
+    expect(next!.fileName).toBe('my image.png');
+    expect(next!.newPath).toBe('/folder/my image.png');
   });
 });
