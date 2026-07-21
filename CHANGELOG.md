@@ -4,6 +4,15 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.16] - 2026-07-19
+
+### Changed
+
+- **License changed to MIT** — The project is now released under the MIT License (Copyright (c) 2026 Andy Lai), replacing the previous AGPL-3.0-or-later license. The AGPL history prior to this release is preserved in the changelog for accuracy.
+- **Removed owner-bound repository URLs from README** — The `github.com/andy51002000/...` release badge, manual-install release link, Plugin Details Repository row, and Building-from-source clone URL have been removed or replaced with owner-neutral text to support a potential repository transfer. The Obsidian community listing URL (`obsidian.md/plugins?id=image-link-updater`) is unaffected. Author identity links (authorUrl, fundingUrl) are retained.
+
+---
+
 ## [1.3.15] - 2026-07-19
 
 ### Fixed
