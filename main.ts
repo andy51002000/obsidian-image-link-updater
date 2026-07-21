@@ -1,5 +1,5 @@
 import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice, EventRef } from 'obsidian';
-import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths, createRetryTask, advanceRetryTask } from './src/utils';
+import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths, createRetryTask, advanceRetryTask, retryTaskKey } from './src/utils';
 import type { RetryTaskState } from './src/utils';
 
 interface ImageLinkUpdaterSettings {
@@ -36,8 +36,9 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
   /**
    * Bounded retry queue for OS-level create fallback.
-   * Key = filename; value = current task state + cleanup refs.
-   * Deduplicates concurrent events for the same file.
+   * Key = retryTaskKey(fileName, newPath) — tasks for the same filename but
+   * different destination paths coexist independently; only an exact
+   * (fileName, newPath) pair is deduplicated/replaced.
    */
   private pendingRetries = new Map<string, {
     state: RetryTaskState;
@@ -490,9 +491,9 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
   }
 
   /**
-   * Enqueue a bounded retry for a filename whose cache candidates were not found.
-   * Deduplicated by filename — a second create event for the same file replaces
-   * any existing pending task (cancels the old one first).
+   * Enqueue a bounded retry for a (fileName, newPath) pair whose cache candidates
+   * were not found. Deduplicated by the full task identity — tasks for the same
+   * filename but different destination paths coexist independently.
    *
    * Retry triggers:
    *   1. metadataCache 'resolved' event — fires when a file's cache entry is ready.
@@ -502,11 +503,13 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
    * On unload, cancelAllRetries() tears down all listeners and timers.
    */
   private enqueueRetry(fileName: string, newPath: string) {
-    // Deduplicate: cancel existing task for this filename if present
-    this.cancelRetry(fileName);
+    const key = retryTaskKey(fileName, newPath);
+
+    // Deduplicate: cancel existing task for the exact same (fileName, newPath) pair
+    this.cancelRetryByKey(key);
 
     const state = createRetryTask(fileName, newPath, Date.now());
-    this.logDebug('enqueueRetry', { fileName, maxAttempts: state.attempts });
+    this.logDebug('enqueueRetry', { key, fileName, newPath });
 
     const entry: {
       state: RetryTaskState;
@@ -515,16 +518,16 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     } = { state, resolvedRef: null, deadlineTimer: null };
 
     const cleanup = () => {
-      this.cancelRetry(fileName);
+      this.cancelRetryByKey(key);
     };
 
     const onResolved = () => {
-      const current = this.pendingRetries.get(fileName);
+      const current = this.pendingRetries.get(key);
       if (!current) return;
 
       const next = advanceRetryTask(current.state, Date.now());
       if (!next) {
-        this.logDebug('retry exhausted for', fileName);
+        this.logDebug('retry exhausted', { key });
         cleanup();
         return;
       }
@@ -533,13 +536,13 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       this.tryApplyByFilename(fileName, newPath).then((found) => {
         if (found) cleanup();
       }).catch((err) => {
-        console.error('[ImageLinkUpdater] retry error for', fileName, err);
+        console.error('[ImageLinkUpdater] retry error', key, err);
         cleanup();
       });
     };
 
     const deadlineTimer = window.setTimeout(() => {
-      this.logDebug('retry deadline reached for', fileName);
+      this.logDebug('retry deadline reached', { key });
       cleanup();
     }, state.deadlineMs - Date.now());
 
@@ -547,12 +550,12 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
     entry.resolvedRef = resolvedRef;
     entry.deadlineTimer = deadlineTimer;
-    this.pendingRetries.set(fileName, entry);
+    this.pendingRetries.set(key, entry);
   }
 
-  /** Cancel a single pending retry task and tear down its resources. */
-  private cancelRetry(fileName: string) {
-    const entry = this.pendingRetries.get(fileName);
+  /** Cancel a single pending retry task by its full task key. */
+  private cancelRetryByKey(key: string) {
+    const entry = this.pendingRetries.get(key);
     if (!entry) return;
     if (entry.resolvedRef) {
       this.app.metadataCache.offref(entry.resolvedRef);
@@ -560,13 +563,13 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     if (entry.deadlineTimer !== null) {
       window.clearTimeout(entry.deadlineTimer);
     }
-    this.pendingRetries.delete(fileName);
+    this.pendingRetries.delete(key);
   }
 
   /** Cancel all pending retry tasks — called from onunload(). */
   private cancelAllRetries() {
-    for (const fileName of this.pendingRetries.keys()) {
-      this.cancelRetry(fileName);
+    for (const key of this.pendingRetries.keys()) {
+      this.cancelRetryByKey(key);
     }
   }
 

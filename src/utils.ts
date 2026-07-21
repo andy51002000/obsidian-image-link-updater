@@ -368,3 +368,13 @@ export function advanceRetryTask(
   if (nowMs >= task.deadlineMs) return null;
   return { ...task, attempts: task.attempts + 1 };
 }
+
+/**
+ * Compute the Map key for a retry task.
+ * Uses NUL (\0) as a separator — a character that never appears in vault paths —
+ * so "A/img.png" + "B/img.png" and "A/img.png" + "A/img.png" produce distinct keys.
+ * Two tasks are the same iff both fileName AND newPath are identical.
+ */
+export function retryTaskKey(fileName: string, newPath: string): string {
+  return `${fileName}\0${newPath}`;
+}

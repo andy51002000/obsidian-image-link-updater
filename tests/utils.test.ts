@@ -10,6 +10,7 @@ import {
   findCandidateSourcePaths,
   createRetryTask,
   advanceRetryTask,
+  retryTaskKey,
   RETRY_MAX_ATTEMPTS,
   RETRY_DEADLINE_MS,
 } from '../src/utils';
@@ -491,5 +492,50 @@ describe('advanceRetryTask', () => {
     const next = advanceRetryTask(task, now + 1);
     expect(next!.fileName).toBe('my image.png');
     expect(next!.newPath).toBe('/folder/my image.png');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// retryTaskKey — task identity helper
+// ---------------------------------------------------------------------------
+describe('retryTaskKey', () => {
+  it('produces identical keys for identical (fileName, newPath)', () => {
+    const k1 = retryTaskKey('img.png', '/A/img.png');
+    const k2 = retryTaskKey('img.png', '/A/img.png');
+    expect(k1).toBe(k2);
+  });
+
+  it('produces DISTINCT keys when newPath differs (same fileName)', () => {
+    const k1 = retryTaskKey('img.png', '/A/img.png');
+    const k2 = retryTaskKey('img.png', '/B/img.png');
+    expect(k1).not.toBe(k2);
+  });
+
+  it('produces DISTINCT keys when fileName differs (same newPath)', () => {
+    const k1 = retryTaskKey('img.png',  '/A/img.png');
+    const k2 = retryTaskKey('img2.png', '/A/img.png');
+    expect(k1).not.toBe(k2);
+  });
+
+  it('contains NUL separator — key cannot be confused with a plain path', () => {
+    const k = retryTaskKey('img.png', '/A/img.png');
+    expect(k).toContain('\0');
+  });
+
+  it('same-filename different-path tasks live as independent map keys', () => {
+    const map = new Map<string, number>();
+    map.set(retryTaskKey('img.png', '/A/img.png'), 1);
+    map.set(retryTaskKey('img.png', '/B/img.png'), 2);
+    expect(map.size).toBe(2);
+    expect(map.get(retryTaskKey('img.png', '/A/img.png'))).toBe(1);
+    expect(map.get(retryTaskKey('img.png', '/B/img.png'))).toBe(2);
+  });
+
+  it('exact-duplicate task produces map size 1 (deduplicated on set)', () => {
+    const map = new Map<string, number>();
+    map.set(retryTaskKey('img.png', '/A/img.png'), 1);
+    map.set(retryTaskKey('img.png', '/A/img.png'), 2); // replaces
+    expect(map.size).toBe(1);
+    expect(map.get(retryTaskKey('img.png', '/A/img.png'))).toBe(2);
   });
 });
