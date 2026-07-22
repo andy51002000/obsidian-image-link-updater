@@ -4,6 +4,18 @@ All notable changes to Image Link Updater are documented here.
 
 ---
 
+## [1.3.18] - 2026-07-22
+
+### Changed
+
+- **Smart attachment folder enabled by default for new installs** — The Smart attachment folder setting is now on by default. On a fresh install (or any vault with no saved plugin data), clipboard-pasted images are automatically routed to the first matching sibling folder from the priority list (`assets`, then `images`). If no matching sibling folder is found, images fall back to the note's own folder.
+
+  Existing users who have explicitly disabled this setting (saved `false` in plugin data) are unaffected — their preference is preserved when settings are loaded.
+
+  Priority list default: `assets, images` (case-sensitive). Customisable in **Settings → Image Link Updater → Smart folder names**.
+
+---
+
 ## [1.3.17] - 2026-07-21
 
 ### Changed
