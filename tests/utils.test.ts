@@ -11,6 +11,7 @@ import {
   createRetryTask,
   advanceRetryTask,
   retryTaskKey,
+  mergeSettings,
   RETRY_MAX_ATTEMPTS,
   RETRY_DEADLINE_MS,
 } from '../src/utils';
@@ -537,5 +538,69 @@ describe('retryTaskKey', () => {
     map.set(retryTaskKey('img.png', '/A/img.png'), 2); // replaces
     expect(map.size).toBe(1);
     expect(map.get(retryTaskKey('img.png', '/A/img.png'))).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeSettings — settings load/merge behaviour
+// ---------------------------------------------------------------------------
+
+interface TestSettings {
+  debugEnabled: boolean;
+  smartAttachmentFolder: boolean;
+  smartFolderNames: string;
+}
+
+const TEST_DEFAULTS: TestSettings = {
+  debugEnabled: false,
+  smartAttachmentFolder: true,   // reflects the real DEFAULT_SETTINGS
+  smartFolderNames: 'assets, images',
+};
+
+describe('mergeSettings', () => {
+  it('new install (null saved data) → all defaults apply, smartAttachmentFolder=true', () => {
+    const result = mergeSettings(TEST_DEFAULTS, null);
+    expect(result.smartAttachmentFolder).toBe(true);
+    expect(result.debugEnabled).toBe(false);
+    expect(result.smartFolderNames).toBe('assets, images');
+  });
+
+  it('new install (undefined saved data) → all defaults apply', () => {
+    const result = mergeSettings(TEST_DEFAULTS, undefined);
+    expect(result.smartAttachmentFolder).toBe(true);
+  });
+
+  it('existing user with explicit false → preserved (not overridden by default true)', () => {
+    const result = mergeSettings(TEST_DEFAULTS, { smartAttachmentFolder: false });
+    expect(result.smartAttachmentFolder).toBe(false);
+  });
+
+  it('existing user with explicit true → preserved', () => {
+    const result = mergeSettings(TEST_DEFAULTS, { smartAttachmentFolder: true });
+    expect(result.smartAttachmentFolder).toBe(true);
+  });
+
+  it('saved custom smartFolderNames → preserved', () => {
+    const result = mergeSettings(TEST_DEFAULTS, { smartFolderNames: 'pics, media' });
+    expect(result.smartFolderNames).toBe('pics, media');
+    // other fields still come from defaults
+    expect(result.smartAttachmentFolder).toBe(true);
+  });
+
+  it('saved debugEnabled=true → preserved', () => {
+    const result = mergeSettings(TEST_DEFAULTS, { debugEnabled: true });
+    expect(result.debugEnabled).toBe(true);
+  });
+
+  it('empty object saved data → all defaults apply', () => {
+    const result = mergeSettings(TEST_DEFAULTS, {});
+    expect(result.smartAttachmentFolder).toBe(true);
+    expect(result.debugEnabled).toBe(false);
+  });
+
+  it('does not mutate the defaults object', () => {
+    const defaults = { ...TEST_DEFAULTS };
+    mergeSettings(defaults, { smartAttachmentFolder: false });
+    expect(defaults.smartAttachmentFolder).toBe(true);
   });
 });

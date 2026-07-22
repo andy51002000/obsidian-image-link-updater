@@ -1,5 +1,5 @@
 import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice, EventRef } from 'obsidian';
-import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths, createRetryTask, advanceRetryTask, retryTaskKey } from './src/utils';
+import { applyLinkReplacements, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths, createRetryTask, advanceRetryTask, retryTaskKey, mergeSettings } from './src/utils';
 import type { RetryTaskState } from './src/utils';
 
 interface ImageLinkUpdaterSettings {
@@ -10,7 +10,7 @@ interface ImageLinkUpdaterSettings {
 
 const DEFAULT_SETTINGS: ImageLinkUpdaterSettings = {
   debugEnabled: false,
-  smartAttachmentFolder: false,
+  smartAttachmentFolder: true,   // enabled by default for new installs
   smartFolderNames: 'assets, images',
 };
 
@@ -215,7 +215,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
   async loadSettings() {
     const data = (await this.loadData()) as Partial<ImageLinkUpdaterSettings> | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    this.settings = mergeSettings(DEFAULT_SETTINGS, data);
   }
 
   async saveSettings() {
@@ -637,11 +637,11 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
       },
       {
         name: 'Smart attachment folder',
-        desc: 'When enabled, pasted images are saved to the first matching sibling folder from the priority list instead of the global attachment folder.',
+        desc: 'When enabled (default for new installs), pasted images are saved to the first matching sibling folder from the priority list instead of the global attachment folder.',
         control: {
           type: 'toggle',
           key: 'smartAttachmentFolder',
-          defaultValue: false,
+          defaultValue: true,
         },
       },
       {
@@ -681,10 +681,10 @@ class ImageLinkUpdaterSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Smart attachment folder')
       .setDesc(
-        'When enabled, pasted images are saved to the first folder in the priority list ' +
-        "that already exists as a sibling of the active note's folder. " +
+        'When enabled (on by default), pasted images are saved to the first folder in the ' +
+        "priority list that already exists as a sibling of the active note's folder. " +
         'If none exists, images are saved into the note\'s own folder. ' +
-        'When disabled (default), Obsidian\'s global attachment folder setting is used.'
+        'When disabled, Obsidian\'s global attachment folder setting is used instead.'
       )
       .addToggle((toggle) =>
         toggle

@@ -4,6 +4,21 @@
  */
 
 /**
+ * Merge saved plugin data onto a set of defaults, returning a complete settings object.
+ *
+ * Behaviour (matches Obsidian's loadData/saveData contract):
+ *   - New install / no saved data (null/undefined) → all defaults apply.
+ *   - Saved data present → explicit saved values override defaults; unrecognised
+ *     keys are ignored (Object.assign semantics, safe forward-compatibility).
+ *
+ * Extracted as a pure function so unit tests can verify the default-on flip for
+ * smartAttachmentFolder without booting the Obsidian runtime.
+ */
+export function mergeSettings<T extends object>(defaults: T, saved: Partial<T> | null | undefined): T {
+  return Object.assign({}, defaults, saved ?? {});
+}
+
+/**
  * Types for MetadataCache link maps (mirrors Obsidian's public API shape).
  * Using plain object types keeps this module free of the Obsidian runtime.
  */

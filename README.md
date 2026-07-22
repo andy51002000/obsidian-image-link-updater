@@ -170,9 +170,13 @@ When you cut and paste files:
 
 Open **Settings → Image Link Updater** to access plugin options:
 
+- **Smart attachment folder** *(enabled by default)* — When on, clipboard-pasted images are saved to the first matching subfolder in the priority list that already exists as a sibling of the active note's folder. For example, if you are editing `notes/my-note.md` and a folder `notes/assets/` exists, the image is saved there. If no matching sibling folder is found, the image is saved into the note's own folder. When disabled, Obsidian's global attachment folder setting is used instead.
+
+- **Smart folder names** — Comma-separated, priority-ordered list of sibling folder names to check (default: `assets, images`). The first existing match wins. Matching is case-sensitive. You can customise this to any folder names your vault uses (e.g. `attachments, media`). Only applies when Smart attachment folder is on.
+
 - **Debug logging** — Enable to log detailed plugin activity to the developer console (Ctrl+Shift+I / Cmd+Option+I). Useful for troubleshooting. Off by default.
 
-The plugin also respects your existing Obsidian settings:
+When Smart attachment folder is **disabled**, the plugin respects your existing Obsidian settings:
 - **Attachment folder path** — pasted images are saved to the folder configured in Obsidian's Files & Links settings, including relative paths like `./attachments`.
 - **Link format** — Markdown image links are generated with URI-encoded vault-root paths.
 
