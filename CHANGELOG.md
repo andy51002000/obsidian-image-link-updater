@@ -8,7 +8,7 @@ All notable changes to Image Link Updater are documented here.
 
 ### Fixed
 
-- **Moved or renamed image links are always normalized to Vault-root absolute paths** — When Obsidian's core link updater ran first and shortened a moved image's link to its bare basename (e.g. `![](img.png)`), the plugin previously left the shortened form in place if the basename did not resolve from the note's location. Links are now normalized to the full Vault-root absolute path (e.g. `![](attachments/img.png)`) in every case, including when Core shortens first, so links stay valid regardless of the note's own location.
+- **Moved or renamed image links are always normalized to Vault-root absolute paths** — When Obsidian's core link updater ran first and shortened a moved image's link to its bare basename (e.g. `![](img.png)`), the plugin previously left the shortened form in place if the basename did not resolve from the note's location. Links are now normalized to the full Vault-root absolute path (e.g. `![](/attachments/img.png)`) in every case, including when Core shortens first, so links stay valid regardless of the note's own location.
 - **Same-name target isolation** — When two images with the same filename exist in different folders, updates triggered by moving one of them can no longer touch links that resolve to the other. Each update pass is now scoped to the exact target file identity rather than the filename.
 
 ### Internal
