@@ -1,6 +1,6 @@
 import { Plugin, PluginSettingTab, Setting, SettingDefinitionItem, TFile, TFolder, normalizePath, Editor, Notice, EventRef, EmbedCache, LinkCache } from 'obsidian';
 import { applyLinkReplacements, rewriteRef, snapshotCandidates, encodeMarkdownPath, mimeSubtypeToExtension, parseSmartFolderNames, resolveSmartAttachmentFolder, findCandidateSourcePaths, createRetryTask, advanceRetryTask, retryTaskKey, mergeSettings } from './src/utils';
-import type { RetryTaskState, SourceProof } from './src/utils';
+import type { RetryTaskState } from './src/utils';
 
 interface ImageLinkUpdaterSettings {
   debugEnabled: boolean;
@@ -111,7 +111,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
           });
         }
 
-        const targetFolder = files.find((f) => f instanceof TFolder) as TFolder;
+        const targetFolder = files.find((f): f is TFolder => f instanceof TFolder);
         if (targetFolder && this.cutFiles.length > 0) {
           menu.addItem((item) => {
             const label = this.cutFiles.length === 1 ? 'Paste file' : `Paste ${this.cutFiles.length} files`;
@@ -141,7 +141,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
 
   private logDebug(msg: string, ...args: unknown[]) {
     if (this.settings.debugEnabled) {
-      console.log(`[ImageLinkUpdater] ${msg}`, ...args);
+      console.debug(`[ImageLinkUpdater] ${msg}`, ...args);
     }
   }
 
@@ -308,7 +308,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       try {
         await this.app.vault.createBinary(candidate, data);
         return candidate;
-      } catch (err) {
+      } catch {
         attempt++;
         candidate = normalizePath(`${stem} ${attempt}${ext}`);
       }
@@ -325,7 +325,7 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
       try {
         await this.app.fileManager.renameFile(file, candidate);
         return;
-      } catch (err) {
+      } catch {
         attempt++;
         candidate = normalizePath(`${stem} ${attempt}${ext}`);
       }
@@ -341,7 +341,10 @@ export default class ImageLinkUpdaterPlugin extends Plugin {
     return normalizePath(`${folder}/${filename}`);
   }
 
-  async loadSettings() { this.settings = mergeSettings(DEFAULT_SETTINGS, await this.loadData()); }
+  async loadSettings() {
+    const data = (await this.loadData()) as Partial<ImageLinkUpdaterSettings> | null;
+    this.settings = mergeSettings(DEFAULT_SETTINGS, data);
+  }
   async saveSettings() { await this.saveData(this.settings); }
 }
 
