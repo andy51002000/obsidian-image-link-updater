@@ -343,3 +343,99 @@ describe("Scenario 6 – Smart attachment folder default-on: image lands in asse
     expect(fs.existsSync(assetsPath)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scenario 7 – Normalization: basename links are lengthened
+//
+// Setup: create a REAL image file and a note with a shortened link.
+// Verifies: moving the image MUST result in a Vault-root absolute path.
+// ---------------------------------------------------------------------------
+describe("Scenario 7 – Normalization: basename links are lengthened", function () {
+  let vaultPath: string;
+
+  before(async function () {
+    await browser.reloadObsidian({ vault: FIXTURE_VAULT });
+    vaultPath = await getCurrentVaultPath();
+
+    // Setup: create a REAL image file and a note with a shortened link
+    const imgPath = path.join(vaultPath, "shortest.png");
+    fs.writeFileSync(imgPath, Buffer.from([0x89, 0x50, 0x4e, 0x47])); // Real PNG header
+
+    const notePath = path.join(vaultPath, "normalization-test.md");
+    fs.writeFileSync(notePath, "# Normalization Test\n\n![](shortest.png)");
+  });
+
+  it("normalizes basename ![](shortest.png) to ![](/subfolder/moved-image.png) on move", async function () {
+    const oldPath = "shortest.png";
+    const newPath = "subfolder/moved-image.png";
+
+    await browser.executeObsidian(({ app }) => {
+      app.vault.createFolder("subfolder").catch(() => {});
+    });
+
+    await fireRename(oldPath, newPath);
+
+    // Poll until normalization completes (lengthened to absolute)
+    await waitForFileContent(vaultPath, "normalization-test.md", (content) =>
+      content.includes("![](/subfolder/moved-image.png)")
+    );
+
+    const noteContent = fs.readFileSync(path.join(vaultPath, "normalization-test.md"), "utf8");
+    expect(noteContent).toContain("![](/subfolder/moved-image.png)");
+    expect(noteContent).not.toContain("![](shortest.png)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 8 – Target-aware safety: same-named images in different folders
+//
+// Fixture: folder-A/same.png, folder-B/same.png + note.md referencing both
+// Verifies: moving folder-A/same.png ONLY updates the link resolving to A/,
+//   leaving the link resolving to B/ untouched.
+// ---------------------------------------------------------------------------
+describe("Scenario 8 – Target-aware safety: same-named images", function () {
+  let vaultPath: string;
+
+  before(async function () {
+    await browser.reloadObsidian({ vault: FIXTURE_VAULT });
+    vaultPath = await getCurrentVaultPath();
+
+    // Setup: create two same-named images in different folders and a note referencing both
+    await browser.executeObsidian(async ({ app }) => {
+      await app.vault.createFolder("folder-A").catch(() => {});
+      await app.vault.createFolder("folder-B").catch(() => {});
+      const data = new ArrayBuffer(0);
+      await app.vault.createBinary("folder-A/same.png", data);
+      await app.vault.createBinary("folder-B/same.png", data);
+    });
+
+    const notePath = path.join(vaultPath, "target-aware-test.md");
+    fs.writeFileSync(
+      notePath,
+      "# Target Aware Test\n\nLink A: ![[folder-A/same.png]]\nLink B: ![[folder-B/same.png]]"
+    );
+  });
+
+  it("only updates the specific link resolving to the moved target", async function () {
+    const oldPath = "folder-A/same.png";
+    const newPath = "folder-C/moved.png";
+
+    await browser.executeObsidian(({ app }) => {
+      app.vault.createFolder("folder-C").catch(() => {});
+    });
+
+    await fireRename(oldPath, newPath);
+
+    // Poll until Link A is updated
+    await waitForFileContent(vaultPath, "target-aware-test.md", (content) =>
+      content.includes("![[/folder-C/moved.png]]")
+    );
+
+    const noteContent = fs.readFileSync(path.join(vaultPath, "target-aware-test.md"), "utf8");
+    // Link A must be updated to absolute path
+    expect(noteContent).toContain("Link A: ![[/folder-C/moved.png]]");
+    // Link B must remain untouched and byte-identical (no extra leading slash added)
+    expect(noteContent).toContain("Link B: ![[folder-B/same.png]]");
+    expect(noteContent).not.toContain("![[/folder-B/same.png]]");
+  });
+});

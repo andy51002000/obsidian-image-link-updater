@@ -25,71 +25,68 @@ export function mergeSettings<T extends object>(defaults: T, saved: Partial<T> |
 export type ResolvedLinkMap   = Record<string, Record<string, number>>;
 export type UnresolvedLinkMap = Record<string, Record<string, number>>;
 
+export interface SourceProof {
+  /** 
+   * How many times this source referenced the EXACT oldPath before rename.
+   * Established from resolvedLinks snapshot.
+   */
+  readonly expectedOldCount: number;
+}
+
 /**
- * Find all Markdown source paths that reference the given image — by full
- * vault path (resolved) or by bare/encoded filename (unresolved / broken).
- *
- * Used for rename/move (full-path match preferred) AND for OS-level
- * delete+create fallback (filename match against unresolved links, which is
- * where a broken link lands after the file was moved outside Obsidian).
- *
- * Algorithm:
- *   Pass 1 — resolvedLinks: collect every source path whose resolved targets
- *     include `imagePath` (exact match on the full vault path).
- *   Pass 2 — unresolvedLinks: collect every source path whose unresolved link
- *     keys match `imageFileName` (bare name) or its URI-encoded form, OR whose
- *     key ends with `/<imageFileName>` (partial-path form).
- *     Also accept `imagePath` itself as an unresolved key (recorded before the
- *     file was indexed with the new location).
- *
- * Results are de-duplicated and returned as a sorted array for determinism.
- *
- * Case-sensitivity: vault paths on Obsidian are case-sensitive on most
- * platforms; we do a case-sensitive match (same as the replacement regex).
- *
- * @param imagePath      Full vault-root path of the image being tracked,
- *                       e.g. "english-class/photo.png". May be the OLD path
- *                       (rename) or the NEW path (create fallback).
- * @param resolvedLinks  MetadataCache.resolvedLinks snapshot.
- * @param unresolvedLinks MetadataCache.unresolvedLinks snapshot.
- * @returns De-duplicated sorted list of Markdown file paths that reference
- *          this image and should have their links updated.
+ * S0 Snapshot: Find all candidate sources and their proof counts.
+ */
+export function snapshotCandidates(
+  oldPath: string,
+  newPath: string,
+  resolvedLinks: ResolvedLinkMap,
+  unresolvedLinks: UnresolvedLinkMap
+): Map<string, SourceProof> {
+  const map = new Map<string, SourceProof>();
+  
+  const oldName = oldPath.split('/').pop() ?? oldPath;
+  const oldNameEnc = encodeURI(oldName);
+
+  // Helper to add or update proof
+  const ensureProof = (path: string, count = 0) => {
+    if (!map.has(path)) map.set(path, { expectedOldCount: count });
+  };
+
+  // Pass 1: resolvedLinks (Targets oldPath or newPath)
+  for (const [source, targets] of Object.entries(resolvedLinks)) {
+    const oldCount = targets[oldPath] ?? 0;
+    const newCount = targets[newPath] ?? 0;
+    if (oldCount > 0 || newCount > 0) {
+      map.set(source, { expectedOldCount: oldCount });
+    }
+  }
+
+  // Pass 2: unresolvedLinks (Targets oldPath, oldName, or encoded oldName)
+  for (const [source, targets] of Object.entries(unresolvedLinks)) {
+    for (const key of Object.keys(targets)) {
+      if (key === oldPath || key === oldName || key === oldNameEnc || 
+          key.endsWith(`/${oldName}`) || key.endsWith(`/${oldNameEnc}`)) {
+        ensureProof(source);
+        break;
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Find all Markdown source paths that reference the given image.
+ * API Compatibility wrapper for existing tests.
  */
 export function findCandidateSourcePaths(
   imagePath: string,
   resolvedLinks: ResolvedLinkMap,
   unresolvedLinks: UnresolvedLinkMap
 ): string[] {
-  const candidates = new Set<string>();
-
-  const imageFileName = imagePath.split('/').pop() ?? imagePath;
-  const imageFileNameEnc = encodeURI(imageFileName);
-
-  // Pass 1: exact full-path match in resolvedLinks
-  for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
-    if (Object.prototype.hasOwnProperty.call(targets, imagePath)) {
-      candidates.add(sourcePath);
-    }
-  }
-
-  // Pass 2: filename / partial-path / full-path match in unresolvedLinks
-  // (broken links — the image doesn't exist at any known path yet)
-  for (const [sourcePath, targets] of Object.entries(unresolvedLinks)) {
-    for (const linkKey of Object.keys(targets)) {
-      if (
-        linkKey === imagePath ||
-        linkKey === imageFileName ||
-        linkKey === imageFileNameEnc ||
-        linkKey.endsWith(`/${imageFileName}`) ||
-        linkKey.endsWith(`/${imageFileNameEnc}`)
-      ) {
-        candidates.add(sourcePath);
-        break; // one match per source is enough
-      }
-    }
-  }
-
-  return [...candidates].sort();
+  // Use snapshotCandidates for a single target (treating it as oldPath)
+  const map = snapshotCandidates(imagePath, '', resolvedLinks, unresolvedLinks);
+  return [...map.keys()].sort();
 }
 
 /**
@@ -197,84 +194,43 @@ export function isInCodeRegion(content: string, index: number): boolean {
 }
 
 /**
- * Build replacement regexes for a rename operation.
- *
- * Strategy:
- *  - mdFull:    matches by full path (raw or encoded). Runs first.
- *  - mdByName:  matches by filename ONLY when preceded by / or start-of-URL
- *               (so "a.png" ≠ "data.png", and won't re-match a full path that
- *               mdFull already rewrote to the new absolute path).
- *  - wikiFull / wikiByName: same strategy for wiki embeds.
- *
- * All markdown patterns capture an optional title attribute (M5).
- * Wiki patterns capture and preserve alias/heading suffixes (H2).
+ * Build replacement regexes for a rename operation (Strict Phase 1).
+ * Only matches exact full paths (raw or encoded).
  */
-export function buildRenamePatterns(oldPath: string, oldFileName: string) {
-  const oldPathNorm = oldPath.startsWith('/') ? oldPath.slice(1) : oldPath;
-  const oldPathEnc = encodeURI(oldPathNorm);
-  const oldNameEnc = encodeURI(oldFileName);
+export function buildStrictFullMatchPatterns(oldPath: string) {
+  const p = oldPath.startsWith('/') ? oldPath.slice(1) : oldPath;
+  const escapedP = escapeRegExp(p);
+  const escapedPEnc = escapeRegExp(encodeURI(p));
 
-  const escapedOldPath = escapeRegExp(oldPathNorm);
-  const escapedOldPathEnc = escapeRegExp(oldPathEnc);
-  const escapedOldName = escapeRegExp(oldFileName);
-  const escapedOldNameEnc = escapeRegExp(oldNameEnc);
-
-  // Title capture group — reusable source fragment
-  // Matches optional `  "title"` before the closing `)`
+  const pathPattern = `(?:/?${escapedP}|/?${escapedPEnc})`;
   const titleCapture = String.raw`(?:\s+"((?:[^"\\]|\\.)*)")?`;
 
-  // Markdown full-path match (raw OR encoded), with optional leading /.
-  // Group 1: alt text, Group 2: optional title
   const mdFull = new RegExp(
-    String.raw`!\[(.*?)\]\(<?(?:/?${escapedOldPath}|/?${escapedOldPathEnc})>?${titleCapture}\)`,
+    String.raw`!\[(.*?)\]\(<?${pathPattern}>?${titleCapture}\)`,
     'gi'
   );
 
-  // Markdown filename-only match: the filename must be the ENTIRE url path component
-  // (preceded by ( or < or / — i.e. no other path segment characters after the last /).
-  // This prevents re-matching after mdFull already rewrote the link to the new absolute path.
-  // Group 1: alt text, Group 2: optional title
-  const mdByName = new RegExp(
-    String.raw`!\[(.*?)\]\(<?(?:[^)]*\/)?(?:${escapedOldName}|${escapedOldNameEnc})>?${titleCapture}\)`,
-    'gi'
-  );
-
-  // Wiki embeds: full path — capture alias/heading suffix (H2)
   const wikiFull = new RegExp(
-    String.raw`!\[\[(?:[^\]]*\/)?${escapedOldPath}((?:[#|][^\]]*)?)\]\]`,
+    String.raw`!\[\[${pathPattern}((?:[#|][^\]]*)?)\]\]`,
     'gi'
   );
 
-  // Wiki embeds: filename — capture alias/heading suffix (H2)
-  // Anchored: filename preceded by / or at start of link content
-  const wikiByName = new RegExp(
-    String.raw`!\[\[(?:[^\]]*\/)?(?:${escapedOldName}|${escapedOldNameEnc})((?:[#|][^\]]*)?)\]\]`,
-    'gi'
-  );
-
-  return { mdFull, mdByName, wikiFull, wikiByName };
+  return { mdFull, wikiFull };
 }
 
 /**
- * Apply link replacements to file content, skipping fenced code regions.
- *
- * Runs mdFull first, then mdByName — but mdByName is guarded so it won't
- * re-match links that mdFull already rewrote (the new path differs from old).
- *
- * Returns the updated content string.
+ * Apply link replacements to file content for Phase 1 (Strict Exact Path).
+ * This phase does not require metadata cache target resolution.
  */
 export function applyLinkReplacements(
   content: string,
   oldPath: string,
-  oldFileName: string,
-  newAbsPath: string   // vault-root absolute path (with leading /)
+  _oldFileName: string, // Kept for API compatibility with existing tests
+  newAbsPath: string
 ): string {
   const absMd = encodeMarkdownPath(newAbsPath);
-  const { mdFull, mdByName, wikiFull, wikiByName } = buildRenamePatterns(oldPath, oldFileName);
+  const { mdFull, wikiFull } = buildStrictFullMatchPatterns(oldPath);
 
-  // In String.prototype.replace callbacks the full parameter list is:
-  //   (fullMatch, ...captureGroups, matchOffset, fullString)
-  // The offset is at args[args.length - 2].
   function safeReplace(
     text: string,
     pattern: RegExp,
@@ -289,7 +245,7 @@ export function applyLinkReplacements(
 
   let updated = content;
 
-  // Pass 1: mdFull — exact full-path match (raw or encoded).
+  // mdFull replacement
   updated = safeReplace(updated, mdFull, (...args) => {
     const alt = (args[1] as string | undefined) ?? '';
     const title = args[2] as string | undefined;
@@ -297,31 +253,8 @@ export function applyLinkReplacements(
     return `![${alt}](${absMd}${titleSuffix})`;
   });
 
-  // Pass 2: mdByName — fallback filename-only match, applied to the already-updated
-  // string. Guard: skip any match that already points to the new absolute path
-  // (meaning pass 1 already rewrote it and the filename still appears in the new path).
-  updated = updated.replace(mdByName, (...args: unknown[]) => {
-    const offset = args[args.length - 2] as number;
-    const match = args[0] as string;
-    if (isInCodeRegion(updated, offset)) return match;
-    const newPathEnc = encodeMarkdownPath(newAbsPath);
-    if (match.includes(newPathEnc) || match.includes(newAbsPath)) return match;
-    const alt = (args[1] as string | undefined) ?? '';
-    const title = args[2] as string | undefined;
-    const titleSuffix = title !== undefined ? ` "${title}"` : '';
-    return `![${alt}](${absMd}${titleSuffix})`;
-  });
-
-  // Wiki embeds
+  // wikiFull replacement
   updated = safeReplace(updated, wikiFull, (...args) => {
-    const suffix = (args[1] as string | undefined) ?? '';
-    return `![[${newAbsPath}${suffix}]]`;
-  });
-
-  updated = safeReplace(updated, wikiByName, (...args) => {
-    const match = args[0] as string;
-    // Skip if already pointing to the new path
-    if (match.includes(newAbsPath)) return match;
     const suffix = (args[1] as string | undefined) ?? '';
     return `![[${newAbsPath}${suffix}]]`;
   });
@@ -329,41 +262,67 @@ export function applyLinkReplacements(
   return updated;
 }
 
-// ---------------------------------------------------------------------------
-// Metadata-cache retry queue — pure state helpers (no Obsidian runtime)
-// ---------------------------------------------------------------------------
-
 /**
- * Immutable state for a single filename-retry task.
- * Stored and mutated via createRetryTask / advanceRetryTask.
+ * S1/S2 surgical link rewrite.
+ * Preserves Markdown title/alt and Wiki alias/heading.
  */
+export function rewriteRef(
+  originalText: string,
+  newAbsPath: string
+): string {
+  const absMd = encodeMarkdownPath(newAbsPath);
+  
+  // Markdown link pattern: exclude space and quotes from path group
+  const mdRegex = /!\[(.*?)\]\(<?([^>\s"]+)>?(\s+"(?:[^"\\]|\\.)*")?\)/i;
+  const mdMatch = originalText.match(mdRegex);
+  if (mdMatch) {
+    const alt = mdMatch[1];
+    const title = mdMatch[3] ?? '';
+    return `![${alt}](${absMd}${title})`;
+  }
+
+  // Wiki embed pattern
+  const wikiRegex = /!\[\[([^|#\]]+)((?:[#|][^\]]*)?)\]\]/i;
+  const wikiMatch = originalText.match(wikiRegex);
+  if (wikiMatch) {
+    const suffix = wikiMatch[2];
+    return `![[${newAbsPath}${suffix}]]`;
+  }
+
+  return originalText;
+}
+
+// Metadata-cache retry helpers
 export interface RetryTaskState {
   readonly fileName: string;
   readonly newPath: string;
   readonly attempts: number;
   readonly deadlineMs: number;   // absolute epoch ms after which we give up
+  /** 
+   * Captured snapshot of expected reference counts per source file.
+   * Required for target-proof fallback during retry events.
+   */
+  readonly sourceProofMap: Record<string, number>;
 }
 
-/** Maximum number of 'resolved' cache events to tolerate per task before giving up. */
 export const RETRY_MAX_ATTEMPTS = 5;
-
-/** Total wall-clock budget (ms) for all retries of a single task. */
 export const RETRY_DEADLINE_MS = 10_000;
 
 /**
  * Create the initial retry task state.
- * `nowMs` is injected for testability (caller passes Date.now()).
  */
 export function createRetryTask(
   fileName: string,
   newPath: string,
-  nowMs: number
+  nowMs: number,
+  sourceProofMap: Record<string, number> = {}
 ): RetryTaskState {
   return {
     fileName,
     newPath,
     attempts: 0,
     deadlineMs: nowMs + RETRY_DEADLINE_MS,
+    sourceProofMap
   };
 }
 

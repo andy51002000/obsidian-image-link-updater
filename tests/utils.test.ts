@@ -5,6 +5,8 @@ import {
   encodeMarkdownPath,
   ensureLeadingSlash,
   applyLinkReplacements,
+  rewriteRef,
+  snapshotCandidates,
   parseSmartFolderNames,
   resolveSmartAttachmentFolder,
   findCandidateSourcePaths,
@@ -306,6 +308,63 @@ describe('resolveSmartAttachmentFolder', () => {
     );
     // parent is '' — fallback is vault root
     expect(result).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rewriteRef — S1/S2 surgical link rewrite
+// ---------------------------------------------------------------------------
+describe('rewriteRef', () => {
+  it('normalizes markdown link to absolute with title', () => {
+    const original = '![alt](old.png "title")';
+    expect(rewriteRef(original, '/a/b/new.png')).toBe('![alt](/a/b/new.png "title")');
+  });
+
+  it('normalizes wiki link to absolute with alias', () => {
+    const original = '![[old.png|alias]]';
+    expect(rewriteRef(original, '/a/b/new.png')).toBe('![[/a/b/new.png|alias]]');
+  });
+
+  it('normalizes wiki link to absolute with heading', () => {
+    const original = '![[old.png#heading]]';
+    expect(rewriteRef(original, '/a/b/new.png')).toBe('![[/a/b/new.png#heading]]');
+  });
+
+  it('preserves alt text and brackets', () => {
+    const original = '![my photo](img.png)';
+    expect(rewriteRef(original, '/new.png')).toBe('![my photo](/new.png)');
+  });
+
+  it('handles spaces in path via encoding', () => {
+    const original = '![[old.png]]';
+    expect(rewriteRef(original, '/dir with spaces/img.png')).toBe('![[/dir with spaces/img.png]]');
+    // Markdown link should be encoded
+    const md = '![](old.png)';
+    expect(rewriteRef(md, '/dir with spaces/img.png')).toBe('![](/dir%20with%20spaces/img.png)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// snapshotCandidates — S0 Snapshot Logic
+// ---------------------------------------------------------------------------
+describe('snapshotCandidates', () => {
+  it('identifies expectedOldCount from resolvedLinks', () => {
+    const r: ResolvedLinkMap = { 'note.md': { 'old.png': 2 } };
+    const snapshot = snapshotCandidates('old.png', 'new.png', r, {});
+    expect(snapshot.get('note.md')?.expectedOldCount).toBe(2);
+  });
+
+  it('includes sources from newPath in resolvedLinks', () => {
+    const r: ResolvedLinkMap = { 'note.md': { 'new.png': 1 } };
+    const snapshot = snapshotCandidates('old.png', 'new.png', r, {});
+    expect(snapshot.has('note.md')).toBe(true);
+  });
+
+  it('includes unresolved sources for fallback', () => {
+    const u: UnresolvedLinkMap = { 'note.md': { 'old.png': 1 } };
+    const snapshot = snapshotCandidates('old.png', 'new.png', {}, u);
+    expect(snapshot.has('note.md')).toBe(true);
+    expect(snapshot.get('note.md')?.expectedOldCount).toBe(0); // Unresolved links don't count towards proof
   });
 });
 
