@@ -414,6 +414,23 @@ describe("Scenario 8 – Target-aware safety: same-named images", function () {
       notePath,
       "# Target Aware Test\n\nLink A: ![[folder-A/same.png]]\nLink B: ![[folder-B/same.png]]"
     );
+
+    // The target-aware update reads resolvedLinks from the metadata cache;
+    // the note above was written externally, so wait until Obsidian has
+    // indexed it — otherwise the rename below races the cache and the
+    // update pass sees no referencing notes.
+    await browser.waitUntil(
+      async () =>
+        browser.executeObsidian(({ app }) => {
+          const links = app.metadataCache.resolvedLinks["target-aware-test.md"];
+          return (
+            !!links &&
+            links["folder-A/same.png"] === 1 &&
+            links["folder-B/same.png"] === 1
+          );
+        }),
+      { timeout: 15000, timeoutMsg: "metadata cache never indexed target-aware-test.md" }
+    );
   });
 
   it("only updates the specific link resolving to the moved target", async function () {

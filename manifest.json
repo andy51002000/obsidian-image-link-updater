@@ -1,7 +1,7 @@
 {
   "id": "image-link-updater",
   "name": "Image Link Updater",
-  "version": "1.3.18",
+  "version": "1.3.19",
   "minAppVersion": "1.5.7",
   "description": "Auto-repairs broken image links vault-wide on rename, move, or paste. Supports Markdown links, Cut & Paste with link updates, and OS-level move detection.",
   "author": "Andy Lai",

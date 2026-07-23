@@ -11,7 +11,7 @@
 - ✂️ **Cut & Paste via right-click context menu** → move one or many files with automatic link updates across your entire vault.
 - 🗃️ **Moved outside Obsidian?** The plugin detects delete+create events and still repairs links by filename.
 
-> **Platform:** Desktop only (Windows, macOS, Linux) &nbsp;|&nbsp; **License:** MIT &nbsp;|&nbsp; **Version:** 1.3.18 &nbsp;|&nbsp; **Requires:** Obsidian ≥ 1.5.7
+> **Platform:** Desktop only (Windows, macOS, Linux) &nbsp;|&nbsp; **License:** MIT &nbsp;|&nbsp; **Version:** 1.3.19 &nbsp;|&nbsp; **Requires:** Obsidian ≥ 1.5.7
 
 ---
 
@@ -209,7 +209,7 @@ When Smart attachment folder is **disabled**, the plugin respects your existing 
 | Field | Value |
 |---|---|
 | **Plugin ID** | `image-link-updater` |
-| **Version** | 1.3.18 |
+| **Version** | 1.3.19 |
 | **Author** | Andy Lai |
 | **License** | MIT (free, open-source) |
 | **Platform** | Desktop only (Windows, macOS, Linux) |
